@@ -41,6 +41,7 @@ add_executable(HTTP_Server
     Thread/thread.cpp
     Monitoring/monitoring.cpp 
     Core/global.cpp
+    Proxy/proxy_handler.cpp
 )
 
 # Specify include directories
@@ -52,6 +53,7 @@ target_include_directories(HTTP_Server PRIVATE
     File_Management 
     Thread 
     Monitoring
+    Proxy
     ${Boost_INCLUDE_DIRS}  # Include Boost headers
     ${JSONCPP_INCLUDE_DIRS} # Include JsonCpp headers
 )

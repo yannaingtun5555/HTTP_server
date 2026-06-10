@@ -69,7 +69,7 @@ void Session::do_read()
                 {
                     Monitoring::logUserActivity(client_ip, user_agent, http_target, Json::Value());
                 }
-                global_thread_pool.post([self, req]() 
+                global_thread_pool.post([self, req]()
                 {
                     auto handler = std::make_shared<Request_handler>(self);
                     handler->handleRequest(req);

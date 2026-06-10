@@ -1,0 +1,17 @@
+# Build output
+build/
+HTTP_Server
+*.o
+*.a
+*.out
+
+# Runtime / local state
+logs/
+Error_logging.txt
+HTTP_Server.pid
+HTTP_Server.mode
+
+# Editor / OS
+*.swp
+*~
+.DS_Store

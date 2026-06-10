@@ -1,3 +1,0 @@
-/home/ynt/Desktop/Project(HTTP_Server) 2/build/CMakeFiles/HTTP_Server.dir
-/home/ynt/Desktop/Project(HTTP_Server) 2/build/CMakeFiles/edit_cache.dir
-/home/ynt/Desktop/Project(HTTP_Server) 2/build/CMakeFiles/rebuild_cache.dir
