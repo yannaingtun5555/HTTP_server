@@ -70,6 +70,8 @@ void Config::load(const string& file_path)
                 port = std::stoi(value);
             else if (key == "root_dir") 
                 root_dir = value;
+            else if (key == "thread_pool_size")
+                thread_pool_size = std::stoi(value);
             else if (key == "backend_connect_timeout")
                 backend_connect_timeout = std::stoi(value);
             else if (key == "backend_response_timeout")

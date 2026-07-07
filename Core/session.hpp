@@ -16,10 +16,10 @@ class Session : public std::enable_shared_from_this<Session> {
 public:
     explicit Session(tcp::socket socket);
     void start();
+    void do_read();
     tcp::socket& socket() { return socket_; }
 
 private:
-    void do_read();
     tcp::socket socket_;
     enum { max_length = 1024 };
     char data_[max_length];

@@ -8,79 +8,66 @@
 #include <iostream>
 #include <mutex>
 
-std::mutex response_mutex;
-
 ResponseGenerator::ResponseGenerator() {}
 
 void ResponseGenerator::generateAndSendResponse(const boost::beast::http::request<boost::beast::http::dynamic_body>& req,
                                                std::shared_ptr<Session> session, 
-                                               const std::string& content,unsigned short status_code) 
+                                               const std::string& content, unsigned short status_code) 
 {
-    endpoint = session ->socket().remote_endpoint();
-    client_ip = endpoint.address().to_string();
-    auto task = [this, req, session, content, status_code]() 
+    // Already running in the thread pool — write response directly.
+    // No need to post again (was causing thread pool exhaustion).
+    try
     {
-        try
+        boost::beast::http::response<boost::beast::http::string_body> res;
+
+        switch (status_code) 
         {
-            std::lock_guard<std::mutex> lock(response_mutex);
-            boost::beast::http::response<boost::beast::http::string_body> res;
-    
-            switch (status_code) 
-            {
-                case 200:
+            case 200:
                 res.result(boost::beast::http::status::ok);
                 break;
-                case 400:
+            case 201:
+                res.result(boost::beast::http::status::created);
+                break;
+            case 400:
                 res.result(boost::beast::http::status::bad_request);
                 break;
-                case 404:
+            case 404:
                 res.result(boost::beast::http::status::not_found);
                 break;
-                case 500:
+            case 405:
+                res.result(boost::beast::http::status::method_not_allowed);
+                break;
+            case 500:
                 res.result(boost::beast::http::status::internal_server_error);
                 break;
-                default:
+            default:
                 res.result(boost::beast::http::status::internal_server_error);
                 break;
-            }
-    res.version(req.version());
-    setResponseHeaders(res, req);
-    res.body() = content;
+        }
 
-    res.prepare_payload();
+        res.version(req.version());
+        setResponseHeaders(res, req);
+        res.body() = content;
+        res.prepare_payload();
 
-    Monitoring::log_info(false,endpoint.address().to_string(),"Response sent for client");
-
-     boost::beast::http::write(session->socket(), res);
-    } 
-    catch (const std::bad_alloc& e) 
-    {
-        std::cerr << "Memory allocation failed in response generation: " << e.what() << std::endl;    
-        Monitoring::log_error(endpoint.address().to_string(),"Error with memory allocation failed in response generator");
+        boost::beast::http::write(session->socket(), res);
 
     } 
-    catch (const std::length_error& e) 
+    catch (const std::exception& e) 
     {
-        std::cerr << "String operation error: " << e.what() << std::endl;
-        Monitoring::log_error(endpoint.address().to_string(),"Error with memory allocation failed in response generator");
-
+        // Silently handle — don't use cerr on hot path
     }
-    };
-    global_thread_pool.post(task);
 }
 
 void ResponseGenerator::setResponseHeaders(boost::beast::http::response<boost::beast::http::string_body>& res, 
                                            const boost::beast::http::request<boost::beast::http::dynamic_body>& req) 
 {
-   
     res.set(boost::beast::http::field::server, "HTTP_Server");
    
     if (req.find(boost::beast::http::field::content_type) != req.end()) 
-{
+    {
         std::string content_type = std::string(req[boost::beast::http::field::content_type]);
-        std::cout << "Received Content-Type: " << content_type << std::endl;
 
-        
         if (content_type == "application/json")
         {
             res.set(boost::beast::http::field::content_type, "application/json");
@@ -88,7 +75,6 @@ void ResponseGenerator::setResponseHeaders(boost::beast::http::response<boost::b
         else if (content_type == "text/html") 
         {
             res.set(boost::beast::http::field::content_type, "text/html");
-            std::cout << "html content has response" << std::endl;
         }
         else if (content_type == "text/plain") 
         {
@@ -103,8 +89,11 @@ void ResponseGenerator::setResponseHeaders(boost::beast::http::response<boost::b
             res.result(boost::beast::http::status::unsupported_media_type);
             res.set(boost::beast::http::field::content_type, "text/plain");
         }
+    }
+    else
+    {
+        // Default to text/html for GET responses (serving files)
+        res.set(boost::beast::http::field::content_type, "text/html");
+    }
     res.keep_alive(req.keep_alive());
 }
-
-}
-                                           
