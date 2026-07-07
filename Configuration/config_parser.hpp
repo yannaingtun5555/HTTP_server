@@ -21,6 +21,7 @@ class Config
         string host;
         unsigned int port;
         int connection_limit;
+        int thread_pool_size = 0; // 0 = auto-detect
         string root_dir;
         bool show;
 

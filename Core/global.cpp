@@ -8,7 +8,6 @@
 
 
 boost::asio::io_context io_context;
-ThreadPool global_thread_pool(std::thread::hardware_concurrency());
-
 Config config;
+ThreadPool global_thread_pool(config.thread_pool_size > 0 ? config.thread_pool_size : std::thread::hardware_concurrency());
 ServerMode server_mode = ServerMode::STATIC;

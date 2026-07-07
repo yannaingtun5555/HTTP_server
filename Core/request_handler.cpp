@@ -11,23 +11,19 @@
 #include <boost/beast/core.hpp>
 #include <boost/beast/http.hpp>
 
-std::mutex session_mutex;
-std::mutex routing_mutex;
-
 Request_handler::Request_handler(std::shared_ptr<Session> session)
     : session(session) {}
 
 void Request_handler::handleRequest(std::shared_ptr<boost::beast::http::request<boost::beast::http::dynamic_body>> req)
 {     
-    {
-        std::lock_guard<std::mutex> lock(session_mutex); 
+    try {
         endpoint = session->socket().remote_endpoint();
-    }  
+    } catch (...) {
+        return; // Socket already closed
+    }
 
     if (server_mode == ServerMode::REVERSE_PROXY)
     {
-        // Reverse proxy mode: initiate async forwarding on the io_context.
-        // ProxyHandler takes over the response; do not write from here.
         auto client_session = session;
         boost::asio::post(io_context, [req, client_session]()
         {
@@ -41,12 +37,10 @@ void Request_handler::handleRequest(std::shared_ptr<boost::beast::http::request<
         // Static mode: validate then route to file handler
         if (isValidRequest(*req))
         {
-            std::lock_guard<std::mutex> lock(routing_mutex);
             routing.processRequest(true, *req, session);
         }
         else
         {
-            std::lock_guard<std::mutex> lock(routing_mutex);
             routing.processRequest(false, *req, session);
         }
     }
