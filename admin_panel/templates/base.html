@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{% block title %}Server Admin Panel{% endblock %}</title>
+  <meta name="description" content="Server Admin Panel — manage hosted sites, databases, and backend containers." />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --primary:   #2563eb;
+      --primary-dark: #1d4ed8;
+      --success:   #16a34a;
+      --error:     #dc2626;
+      --warning:   #d97706;
+      --bg:        #f8fafc;
+      --card:      #ffffff;
+      --border:    #e2e8f0;
+      --text:      #1e293b;
+      --muted:     #64748b;
+      --nav-bg:    #1e293b;
+      --nav-text:  #f1f5f9;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      line-height: 1.5;
+    }
+
+    /* ── Navigation ── */
+    nav {
+      background: var(--nav-bg);
+      padding: 0 2rem;
+      display: flex;
+      align-items: center;
+      gap: 2rem;
+      height: 56px;
+      box-shadow: 0 1px 4px rgba(0,0,0,.25);
+    }
+    nav .brand {
+      font-size: 1.1rem;
+      font-weight: 700;
+      color: var(--nav-text);
+      letter-spacing: .02em;
+      text-decoration: none;
+      white-space: nowrap;
+    }
+    nav .spacer { flex: 1; }
+    nav a {
+      color: #94a3b8;
+      text-decoration: none;
+      font-size: .9rem;
+      font-weight: 500;
+      padding: .3rem .6rem;
+      border-radius: 6px;
+      transition: color .15s, background .15s;
+    }
+    nav a:hover { color: var(--nav-text); background: rgba(255,255,255,.08); }
+
+    /* ── Page wrapper ── */
+    .page { max-width: 1100px; margin: 0 auto; padding: 2rem 1.5rem; }
+
+    /* ── Cards ── */
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 1.5rem;
+      margin-bottom: 1.5rem;
+      box-shadow: 0 1px 3px rgba(0,0,0,.06);
+    }
+    .card-title {
+      font-size: 1.1rem;
+      font-weight: 600;
+      margin-bottom: 1rem;
+      color: var(--text);
+    }
+
+    /* ── Tables ── */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: .9rem;
+    }
+    thead tr { border-bottom: 2px solid var(--border); }
+    th {
+      text-align: left;
+      padding: .6rem .75rem;
+      font-weight: 600;
+      color: var(--muted);
+      font-size: .8rem;
+      text-transform: uppercase;
+      letter-spacing: .05em;
+    }
+    td { padding: .65rem .75rem; border-bottom: 1px solid var(--border); vertical-align: middle; }
+    tbody tr:last-child td { border-bottom: none; }
+    tbody tr:hover { background: #f8fafc; }
+
+    /* ── Forms ── */
+    .form-group { margin-bottom: 1.1rem; }
+    label {
+      display: block;
+      font-size: .875rem;
+      font-weight: 500;
+      margin-bottom: .35rem;
+      color: var(--text);
+    }
+    input[type=text],
+    input[type=number],
+    input[type=password],
+    select,
+    textarea {
+      width: 100%;
+      padding: .5rem .75rem;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      font-size: .95rem;
+      color: var(--text);
+      background: #fff;
+      transition: border-color .15s, box-shadow .15s;
+      outline: none;
+    }
+    input:focus, select:focus, textarea:focus {
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(37,99,235,.15);
+    }
+    .errorlist { list-style: none; color: var(--error); font-size: .82rem; margin-top: .25rem; }
+
+    /* ── Buttons ── */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: .4rem;
+      padding: .55rem 1.2rem;
+      border-radius: 7px;
+      font-size: .9rem;
+      font-weight: 600;
+      cursor: pointer;
+      border: none;
+      text-decoration: none;
+      transition: background .15s, transform .08s, box-shadow .15s;
+      line-height: 1;
+    }
+    .btn:active { transform: scale(.97); }
+    .btn-primary { background: var(--primary); color: #fff; }
+    .btn-primary:hover { background: var(--primary-dark); box-shadow: 0 2px 8px rgba(37,99,235,.35); }
+    .btn-success { background: var(--success); color: #fff; }
+    .btn-success:hover { background: #15803d; }
+    .btn-danger  { background: var(--error); color: #fff; }
+    .btn-danger:hover  { background: #b91c1c; }
+    .btn-secondary { background: #e2e8f0; color: var(--text); }
+    .btn-secondary:hover { background: #cbd5e1; }
+    .btn-sm { padding: .35rem .8rem; font-size: .8rem; }
+
+    /* ── Status badges ── */
+    .badge {
+      display: inline-block;
+      padding: .2rem .6rem;
+      border-radius: 999px;
+      font-size: .75rem;
+      font-weight: 600;
+      letter-spacing: .02em;
+    }
+    .badge-pending   { background: #e5e7eb; color: #374151; }
+    .badge-building  { background: #dbeafe; color: #1e40af; }
+    .badge-running   { background: #dcfce7; color: #166534; }
+    .badge-error     { background: #fee2e2; color: #991b1b; }
+    .badge-stopped   { background: #fef3c7; color: #92400e; }
+    .badge-deleting  { background: #ede9fe; color: #5b21b6; }
+
+    /* ── Alerts ── */
+    .alert {
+      padding: .9rem 1.1rem;
+      border-radius: 8px;
+      margin-bottom: 1rem;
+      font-size: .9rem;
+    }
+    .alert-success { background: #dcfce7; color: #166534; border: 1px solid #bbf7d0; }
+    .alert-error   { background: #fee2e2; color: #991b1b; border: 1px solid #fecaca; }
+    .alert-info    { background: #dbeafe; color: #1e40af; border: 1px solid #bfdbfe; }
+
+    /* ── Page header ── */
+    .page-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 1.5rem;
+    }
+    .page-header h1 { font-size: 1.5rem; font-weight: 700; }
+
+    /* ── Empty state ── */
+    .empty-state {
+      text-align: center;
+      padding: 3rem 1rem;
+      color: var(--muted);
+    }
+    .empty-state h3 { font-size: 1.1rem; margin-bottom: .5rem; color: var(--text); }
+
+    /* ── Step indicator ── */
+    .steps {
+      display: flex;
+      gap: .5rem;
+      align-items: center;
+      margin-bottom: 1.5rem;
+      font-size: .85rem;
+      color: var(--muted);
+    }
+    .step-active { font-weight: 700; color: var(--primary); }
+    .step-sep { color: var(--border); }
+
+    /* ── Key-value pairs ── */
+    .kv { display: grid; grid-template-columns: 180px 1fr; gap: .5rem 1rem; font-size: .9rem; }
+    .kv dt { color: var(--muted); font-weight: 500; }
+    .kv dd { word-break: break-all; }
+
+    /* ── Utility ── */
+    .mt-1 { margin-top: .5rem; }
+    .mt-2 { margin-top: 1rem; }
+    .mt-3 { margin-top: 1.5rem; }
+    .mb-1 { margin-bottom: .5rem; }
+    .text-muted { color: var(--muted); font-size: .875rem; }
+    code.conn {
+      font-family: 'SFMono-Regular', Consolas, monospace;
+      font-size: .8rem;
+      background: #f1f5f9;
+      padding: .15rem .4rem;
+      border-radius: 4px;
+      word-break: break-all;
+    }
+  </style>
+  {% block extra_head %}{% endblock %}
+</head>
+<body>
+  <nav>
+    <a class="brand" href="/_admin/">⚙ Server Admin Panel</a>
+    <span class="spacer"></span>
+    <a href="/_admin/">Dashboard</a>
+    <a href="/_admin/add/">Add Site</a>
+  </nav>
+
+  <div class="page">
+    {% block content %}{% endblock %}
+  </div>
+</body>
+</html>

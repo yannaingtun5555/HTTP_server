@@ -1,28 +1,37 @@
 #ifndef ROUTING_HPP
 #define ROUTING_HPP
 
-#include <boost/beast/http.hpp>
+#include <string>
 #include <memory>
-#include "../Core/session.hpp"
-#include "../Error_handling/error_handling.hpp"
-#include "../Core/response_generator.hpp"
+#include <boost/beast/http.hpp>
 #include "../File_Management/file_handler.hpp"
+#include "../Core/response_generator.hpp"
 
-class Routing {
+class Session;
+
+// ─────────────────────────────────────────────────────────────
+//  Routing — domain-aware static file routing
+//  Serves files from: <sites_root>/<domain>/public/<path>
+// ─────────────────────────────────────────────────────────────
+class Routing
+{
 public:
-    Routing(); 
+    Routing();
 
-    
-    void processRequest(bool request_valid,const boost::beast::http::request<boost::beast::http::dynamic_body>& req,
-                        std::shared_ptr<Session> session);
-    bool isExternalRequest(const std::string& target);
-    void handleExternalRequest(const std::string& target, const boost::beast::http::request<boost::beast::http::dynamic_body>& req,
-                                    std::shared_ptr<Session> session);
+    // Process a static-file request for a given domain.
+    // `domain` is extracted from the Host: header by the request handler.
+    void processRequest(bool request_valid,
+                        const boost::beast::http::request<boost::beast::http::dynamic_body>& req,
+                        std::shared_ptr<Session> session,
+                        const std::string& domain = "");
 
 private:
+    FileManager   file_manager;
     ResponseGenerator response;
-    FileManager file_manager;
-    std::string client_ip;
+
+    // Resolve the public path for a domain + URL path
+    std::string resolvePath(const std::string& domain,
+                            const std::string& url_path) const;
 };
 
-#endif 
+#endif // ROUTING_HPP

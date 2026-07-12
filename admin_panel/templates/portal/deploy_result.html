@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% block title %}Deploy Result — Server Admin Panel{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1>Deploy Result</h1>
+</div>
+
+{% if result.success %}
+<div class="alert alert-success" style="margin-bottom:1.5rem;">
+  ✅ Site deployed successfully!
+</div>
+
+<div class="card">
+  <div class="card-title">Deployment Summary</div>
+
+  {% if result.data.domain %}
+  <dl class="kv">
+    <dt>Domain</dt>
+    <dd><strong>{{ result.data.domain }}</strong></dd>
+
+    {% if result.data.be_status %}
+    <dt>Backend status</dt>
+    <dd><span class="badge badge-{{ result.data.be_status }}">{{ result.data.be_status }}</span></dd>
+    {% endif %}
+
+    {% if result.data.be_host %}
+    <dt>Backend host</dt>
+    <dd>{{ result.data.be_host }}</dd>
+    {% endif %}
+  </dl>
+  {% endif %}
+
+  {% if result.data.databases %}
+  <div class="card-title mt-3">Database Connection Strings</div>
+  <table>
+    <thead>
+      <tr>
+        <th>Alias</th>
+        <th>Type</th>
+        <th>Connection String</th>
+        <th>Status</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for db in result.data.databases %}
+      <tr>
+        <td>{{ db.alias }}</td>
+        <td>{{ db.type }}</td>
+        <td><code class="conn">{{ db.connection_str }}</code></td>
+        <td><span class="badge badge-{{ db.status }}">{{ db.status }}</span></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</div>
+
+<div class="mt-2">
+  <a href="/_admin/site/{{ result.data.domain }}/" class="btn btn-primary">View Site Detail →</a>
+  <a href="/_admin/" class="btn btn-secondary" style="margin-left:.75rem;">Back to Dashboard</a>
+</div>
+
+{% else %}
+<div class="alert alert-error">
+  ❌ Deployment failed.
+</div>
+
+<div class="card">
+  <div class="card-title">Error Details</div>
+  <pre style="white-space:pre-wrap;word-break:break-all;font-size:.85rem;color:var(--error);background:#fff5f5;padding:.75rem;border-radius:6px;border:1px solid #fecaca;">{{ result.error }}</pre>
+</div>
+
+<div class="mt-2">
+  <a href="/_admin/add/" class="btn btn-primary">← Try Again</a>
+  <a href="/_admin/" class="btn btn-secondary" style="margin-left:.75rem;">Back to Dashboard</a>
+</div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,71 @@
+# =============================================================================
+# Backend Deployment Template
+# Replace all PLACEHOLDER_* values with actual values before applying.
+# =============================================================================
+
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: site-DOMAIN   # PLACEHOLDER: replace DOMAIN with the actual domain slug (e.g. site-example-com)
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: be-DOMAIN                  # PLACEHOLDER: e.g. be-example-com
+  namespace: site-DOMAIN           # PLACEHOLDER: match namespace above
+  labels:
+    app: be-DOMAIN                 # PLACEHOLDER: match name
+    site: DOMAIN                   # PLACEHOLDER: domain slug
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: be-DOMAIN               # PLACEHOLDER
+  template:
+    metadata:
+      labels:
+        app: be-DOMAIN             # PLACEHOLDER
+    spec:
+      containers:
+        - name: backend
+          image: PLACEHOLDER_IMAGE              # e.g. node:18-alpine, python:3.11-slim, golang:1.21
+          command: PLACEHOLDER_RUN_CMD          # e.g. ["node", "server.js"] or ["python", "app.py"]
+          ports:
+            - containerPort: PLACEHOLDER_BE_PORT  # e.g. 3000, 8000, 8080
+          env:
+            # PLACEHOLDER_DB_URLS: add one entry per database
+            # Example entries (uncomment and fill in):
+            # - name: DATABASE_URL
+            #   value: "postgresql://user:pass@db-DOMAIN-alias.site-DOMAIN.svc.cluster.local:5432/dbname"
+            # - name: REDIS_URL
+            #   value: "redis://db-DOMAIN-redis.site-DOMAIN.svc.cluster.local:6379/0"
+            - name: PORT
+              value: "PLACEHOLDER_BE_PORT"       # PLACEHOLDER: same as containerPort
+          volumeMounts:
+            - name: be-source
+              mountPath: /app                    # mount path inside container
+      volumes:
+        - name: be-source
+          hostPath:
+            path: PLACEHOLDER_BE_FOLDER         # PLACEHOLDER: absolute path on host node
+            type: Directory
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: be-DOMAIN                  # PLACEHOLDER: e.g. be-example-com
+  namespace: site-DOMAIN           # PLACEHOLDER
+  labels:
+    app: be-DOMAIN                 # PLACEHOLDER
+spec:
+  type: ClusterIP
+  selector:
+    app: be-DOMAIN                 # PLACEHOLDER
+  ports:
+    - name: http
+      protocol: TCP
+      port: PLACEHOLDER_BE_PORT    # PLACEHOLDER: e.g. 3000
+      targetPort: PLACEHOLDER_BE_PORT  # PLACEHOLDER: same as containerPort

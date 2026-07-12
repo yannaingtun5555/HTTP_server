@@ -1,0 +1,186 @@
+{% extends "base.html" %}
+{% block title %}{{ site.domain }} — Server Admin Panel{% endblock %}
+
+{% block extra_head %}
+<style>
+  .conn-masked { font-family: monospace; font-size:.82rem; color: var(--muted); }
+  #status-badge { transition: background .3s, color .3s; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1>{{ site.domain }}</h1>
+  <div style="display:flex;gap:.75rem;">
+    <a href="/_admin/" class="btn btn-secondary btn-sm">← Dashboard</a>
+    <a href="/_admin/site/{{ site.domain }}/delete/" class="btn btn-danger btn-sm">Delete Site</a>
+  </div>
+</div>
+
+<!-- Domain Info Card -->
+<div class="card">
+  <div class="card-title">Site Information</div>
+  <dl class="kv">
+    <dt>Domain</dt>        <dd><strong>{{ site.domain }}</strong></dd>
+    <dt>Owner</dt>         <dd>{{ site.user_owner|default:"—" }}</dd>
+    <dt>Status</dt>
+    <dd>
+      <span class="badge badge-{{ site.status }}" id="status-badge">{{ site.status }}</span>
+      {% if site.error_msg %}
+        <span class="text-muted" style="margin-left:.5rem;font-size:.82rem;">{{ site.error_msg }}</span>
+      {% endif %}
+    </dd>
+    <dt>Backend type</dt>  <dd>{{ site.be_type|default:"—" }}</dd>
+    <dt>Run command</dt>   <dd><code class="conn">{{ site.run_cmd|default:"—" }}</code></dd>
+    <dt>Backend port</dt>  <dd>{{ site.be_port }}</dd>
+    <dt>FE folder</dt>     <dd><code class="conn">{{ site.fe_folder|default:"—" }}</code></dd>
+    <dt>BE folder</dt>     <dd><code class="conn">{{ site.be_folder|default:"—" }}</code></dd>
+    <dt>FE build</dt>      <dd>{{ site.fe_build|default:"—" }}</dd>
+    <dt>Databases</dt>     <dd>{{ site.db_count }}</dd>
+    <dt>Created</dt>       <dd>{{ site.created_at|date:"Y-m-d H:i:s" }} UTC</dd>
+    <dt>Updated</dt>       <dd>{{ site.updated_at|date:"Y-m-d H:i:s" }} UTC</dd>
+  </dl>
+</div>
+
+<!-- Backend Container -->
+<div class="card">
+  <div class="card-title">Backend Container</div>
+  {% if be_container %}
+  <dl class="kv">
+    <dt>Status</dt>
+    <dd>
+      <span class="badge badge-{{ be_container.status }}" id="be-status-badge">{{ be_container.status }}</span>
+    </dd>
+    <dt>Image</dt>       <dd>{{ be_container.image_tag|default:"—" }}</dd>
+    <dt>Namespace</dt>   <dd>{{ be_container.k8s_namespace|default:"—" }}</dd>
+    <dt>Deployment</dt>  <dd>{{ be_container.k8s_deployment|default:"—" }}</dd>
+    <dt>Service</dt>     <dd>{{ be_container.k8s_service|default:"—" }}</dd>
+    <dt>Host</dt>        <dd>{{ be_container.be_host|default:"—" }}</dd>
+    <dt>Port</dt>        <dd>{{ be_container.be_port|default:"—" }}</dd>
+    <dt>Deployed at</dt> <dd>{{ be_container.deployed_at|date:"Y-m-d H:i:s"|default:"—" }} UTC</dd>
+    {% if be_container.error_log %}
+    <dt>Error log</dt>
+    <dd>
+      <pre style="white-space:pre-wrap;word-break:break-all;font-size:.78rem;color:var(--error);background:#fff5f5;padding:.6rem;border-radius:6px;border:1px solid #fecaca;max-height:200px;overflow-y:auto;">{{ be_container.error_log }}</pre>
+    </dd>
+    {% endif %}
+  </dl>
+  {% else %}
+  <p class="text-muted">No backend container record found.</p>
+  {% endif %}
+</div>
+
+<!-- Database Containers -->
+<div class="card" style="padding:0;overflow:hidden;">
+  <div class="card-title" style="padding:1rem 1.5rem 0;">Databases</div>
+  {% if db_containers %}
+  <table>
+    <thead>
+      <tr>
+        <th>Alias</th>
+        <th>Type</th>
+        <th>Name</th>
+        <th>Namespace</th>
+        <th>Cluster IP</th>
+        <th>Port</th>
+        <th>Connection String</th>
+        <th>Status</th>
+      </tr>
+    </thead>
+    <tbody id="db-table-body">
+      {% for db in db_containers %}
+      <tr data-db-id="{{ db.id }}">
+        <td><strong>{{ db.db_alias }}</strong></td>
+        <td>{{ db.db_type }}</td>
+        <td>{{ db.db_name }}</td>
+        <td>{{ db.k8s_namespace|default:"—" }}</td>
+        <td>{{ db.cluster_ip|default:"—" }}</td>
+        <td>{{ db.port|default:"—" }}</td>
+        <td>
+          {% if db.connection_str %}
+          <code class="conn-masked">
+            {{ db.connection_str|slice:":8" }}••••••••{{ db.connection_str|slice:"-6:" }}
+          </code>
+          {% else %}—{% endif %}
+        </td>
+        <td>
+          <span class="badge badge-{{ db.status }} db-status-badge" data-db-id="{{ db.id }}">{{ db.status }}</span>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state" style="padding:2rem;">
+    <p class="text-muted">No database containers found.</p>
+  </div>
+  {% endif %}
+</div>
+
+<!-- Auto-refresh polling script -->
+<script>
+(function () {
+  const POLL_INTERVAL = 3000;
+  const TERMINAL_STATUSES = ['running', 'error', 'stopped'];
+  const domain = '{{ site.domain|escapejs }}';
+  const statusUrl = '/_admin/site/' + domain + '/status.json';
+
+  function getBadgeClass(status) {
+    return 'badge badge-' + status;
+  }
+
+  function shouldPoll() {
+    const badge = document.getElementById('status-badge');
+    if (!badge) return false;
+    const status = badge.textContent.trim();
+    return !TERMINAL_STATUSES.includes(status);
+  }
+
+  function updateBadge(el, newStatus) {
+    if (!el) return;
+    if (el.textContent.trim() !== newStatus) {
+      el.className = getBadgeClass(newStatus);
+      el.textContent = newStatus;
+    }
+  }
+
+  function poll() {
+    if (!shouldPoll()) return;
+
+    fetch(statusUrl)
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        // Update main status badge
+        updateBadge(document.getElementById('status-badge'), data.status);
+
+        // Update BE status badge
+        if (data.be) {
+          updateBadge(document.getElementById('be-status-badge'), data.be.status);
+        }
+
+        // Update DB status badges
+        if (data.dbs && Array.isArray(data.dbs)) {
+          data.dbs.forEach(function (db) {
+            var badges = document.querySelectorAll('.db-status-badge[data-db-id="' + db.id + '"]');
+            badges.forEach(function (b) { updateBadge(b, db.status); });
+          });
+        }
+
+        // Keep polling if still in progress
+        if (shouldPoll()) {
+          setTimeout(poll, POLL_INTERVAL);
+        }
+      })
+      .catch(function () {
+        // Retry on network error
+        setTimeout(poll, POLL_INTERVAL * 2);
+      });
+  }
+
+  // Start polling if status is pending/building
+  if (shouldPoll()) {
+    setTimeout(poll, POLL_INTERVAL);
+  }
+})();
+</script>
+{% endblock %}

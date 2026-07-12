@@ -63,6 +63,9 @@ install_deps() {
                 cmake make gcc gcc-c++ \
                 boost-devel \
                 jsoncpp-devel \
+                libpqxx-devel \
+                libcurl-devel \
+                python3 python3-pip \
                 pkg-config \
                 wrk 2>/dev/null || true
             ;;
@@ -73,6 +76,9 @@ install_deps() {
                 cmake make gcc gcc-c++ \
                 boost-devel \
                 jsoncpp-devel \
+                libpqxx-devel \
+                libcurl-devel \
+                python3 python3-pip \
                 pkg-config
             ;;
         debian)
@@ -81,6 +87,9 @@ install_deps() {
                 cmake make g++ \
                 libboost-all-dev \
                 libjsoncpp-dev \
+                libpqxx-dev \
+                libcurl4-openssl-dev \
+                python3 python3-pip \
                 pkg-config \
                 wrk 2>/dev/null || true
             ;;
@@ -89,6 +98,10 @@ install_deps() {
                 cmake make gcc \
                 boost \
                 jsoncpp \
+                libpqxx \
+                curl \
+                python \
+                python-pip \
                 pkg-config
             ;;
         suse)
@@ -113,6 +126,28 @@ install_deps() {
     esac
 
     log_info "Dependencies installed."
+
+    # ── kubectl (for kubeadm K8s cluster management) ─────────────
+    log_step "Checking kubectl..."
+    if ! command -v kubectl &>/dev/null; then
+        log_step "Installing kubectl..."
+        curl -LO "https://dl.k8s.io/release/$(curl -Ls https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+        chmod +x kubectl
+        sudo mv kubectl /usr/local/bin/kubectl
+        log_info "kubectl installed: $(kubectl version --client --short 2>/dev/null || kubectl version --client)"
+    else
+        log_info "kubectl already available: $(kubectl version --client --short 2>/dev/null || true)"
+    fi
+
+    # ── Bootstrap server-system namespace and server PostgreSQL ──
+    log_step "Applying K8s server manifests (if cluster is reachable)..."
+    if kubectl cluster-info &>/dev/null 2>&1; then
+        kubectl apply -f k8s/postgres-server-db.yaml  || log_warn "K8s apply failed — ensure cluster is running"
+        kubectl apply -f k8s/admin-panel.yaml         || log_warn "K8s apply failed for admin-panel"
+        log_info "K8s server manifests applied."
+    else
+        log_warn "No K8s cluster reachable. Apply k8s/postgres-server-db.yaml and k8s/admin-panel.yaml manually."
+    fi
 }
 
 # ── Verify Dependencies ──────────────────────────────────────

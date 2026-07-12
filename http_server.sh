@@ -211,18 +211,69 @@ clear_logs() {
 }
 
 help() {
-    echo "Usage: $0 {start|reverse|stop|status|log|restart|config|clear_logs|help}"
+    echo "Usage: $0 {start|reverse|stop|status|log|restart|config|clear_logs|sites|deploy|delete-site|site-logs|help}"
     echo
-    echo "Commands:"
-    echo "  start        Start in STATIC file serving mode (background)"
-    echo "  reverse      Start in REVERSE PROXY mode (background)"
-    echo "  stop         Stop the server (works for both modes)"
+    echo "Server commands:"
+    echo "  start        Start in platform mode (virtual-host static + K8s backends)"
+    echo "  reverse      Start in legacy REVERSE PROXY mode (background)"
+    echo "  stop         Stop the server"
     echo "  status       Show PID and running mode"
     echo "  log          Tail the server log"
     echo "  restart      Restart in the same mode as last run"
-    echo "  config <key> <value>  Update config.txt"
+    echo "  config <key> <value>  Update server.conf"
     echo "  clear_logs   Clear files in $LOGS_DIR"
+    echo
+    echo "Platform commands:"
+    echo "  sites        List all managed sites from server DB"
+    echo "  deploy <domain>  Trigger re-deploy of a site (calls internal API)"
+    echo "  delete-site <domain>  Delete a site and its K8s containers"
+    echo "  site-logs <domain>  Stream K8s BE pod logs for a site"
     echo "  help         Show this help"
+}
+
+# ── Platform commands ─────────────────────────────────────────
+sites() {
+    INTERNAL_SECRET=$(grep '^internal_api_secret=' server.conf 2>/dev/null | cut -d= -f2 || echo 'changeme-secret')
+    API_URL=$(grep '^internal_api_path_prefix=' server.conf 2>/dev/null | cut -d= -f2 || echo '/_api/internal')
+    PORT=$(grep '^server_port=' server.conf 2>/dev/null | cut -d= -f2 || echo '80')
+    curl -s -H "X-Internal-Secret: $INTERNAL_SECRET" \
+         "http://127.0.0.1:$PORT${API_URL}/status/" 2>/dev/null \
+         || echo "Server not running or internal API unavailable"
+}
+
+deploy_site() {
+    local domain="$1"
+    if [ -z "$domain" ]; then echo "Usage: $0 deploy <domain>"; exit 1; fi
+    INTERNAL_SECRET=$(grep '^internal_api_secret=' server.conf 2>/dev/null | cut -d= -f2 || echo 'changeme-secret')
+    PORT=$(grep '^server_port=' server.conf 2>/dev/null | cut -d= -f2 || echo '80')
+    echo "Triggering deploy for $domain via internal API..."
+    curl -s -X POST \
+         -H "X-Internal-Secret: $INTERNAL_SECRET" \
+         -H "Content-Type: application/json" \
+         -d "{\"domain\":\"$domain\"}" \
+         "http://127.0.0.1:$PORT/_api/internal/reload"
+    echo
+}
+
+delete_site_cmd() {
+    local domain="$1"
+    if [ -z "$domain" ]; then echo "Usage: $0 delete-site <domain>"; exit 1; fi
+    INTERNAL_SECRET=$(grep '^internal_api_secret=' server.conf 2>/dev/null | cut -d= -f2 || echo 'changeme-secret')
+    PORT=$(grep '^server_port=' server.conf 2>/dev/null | cut -d= -f2 || echo '80')
+    echo "Deleting site $domain..."
+    curl -s -X DELETE \
+         -H "X-Internal-Secret: $INTERNAL_SECRET" \
+         "http://127.0.0.1:$PORT/_api/internal/delete/$domain"
+    echo
+}
+
+site_logs() {
+    local domain="$1"
+    if [ -z "$domain" ]; then echo "Usage: $0 site-logs <domain>"; exit 1; fi
+    safe=$(echo "$domain" | tr '.' '-')
+    echo "Fetching K8s logs for be-$safe in namespace site-$safe..."
+    kubectl logs -n "site-$safe" -l "app=be-$safe" --tail=100 -f 2>/dev/null \
+        || echo "kubectl not configured or pod not found"
 }
 
 case "$1" in
@@ -254,11 +305,23 @@ case "$1" in
     clear_logs)
         clear_logs
         ;;
+    sites)
+        sites
+        ;;
+    deploy)
+        deploy_site "$2"
+        ;;
+    delete-site)
+        delete_site_cmd "$2"
+        ;;
+    site-logs)
+        site_logs "$2"
+        ;;
     help|--help|-h)
         help
         ;;
     *)
-        echo "Usage: $0 {start|reverse|stop|status|log|restart|config|clear_logs|help}"
+        echo "Usage: $0 {start|reverse|stop|status|log|restart|config|clear_logs|sites|deploy|delete-site|site-logs|help}"
         exit 1
         ;;
 esac
