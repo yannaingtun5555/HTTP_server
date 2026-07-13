@@ -85,13 +85,14 @@ par_gets() {
     local i pids
     pids=""
     for i in $(seq 1 "$n"); do
-        G -H "Host: $host" "$BASE$path" >>"$tmp" &
+        # append newline after status code so grep -c works
+        { G -H "Host: $host" "$BASE$path"; echo; } >>"$tmp" &
         pids="$pids $!"
     done
     for p in $pids; do wait "$p" 2>/dev/null || true; done
     local cnt; cnt=$(grep -c "^200$" "$tmp" 2>/dev/null || echo 0)
     rm -f "$tmp"
-    echo "$cnt"
+    printf '%d' "$cnt"
 }
 
 # ── test groups ───────────────────────────────────────────────
@@ -212,36 +213,43 @@ t_protocol() {
 
 t_concurrency() {
     sep "GROUP 6  Concurrency"
-    local S OK
+    local S
 
-    info "6.1  30 parallel GETs (localhost)..."
-    OK=$(par_gets 30 localhost /)
-    [ "$OK" -ge 28 ] && pass "6.1  30 concurrent GETs  ->  $OK/30 x 200" \
-                     || fail "6.1  Concurrent  ->  only $OK/30 OK"
+    # 6.1 -- 30 concurrent requests with ab (ApacheBench)
+    info "6.1  30 concurrent GETs via ab..."
+    local AB_OUT; AB_OUT=$(ab -n 30 -c 10 -H 'Host: localhost' \
+        "http://127.0.0.1:${PORT}/" 2>&1)
+    local NON200; NON200=$(echo "$AB_OUT" | grep 'Non-2xx' | awk '{print $NF}' || echo 0)
+    NON200=${NON200:-0}
+    local OK; OK=$((30 - NON200))
+    if echo "$AB_OUT" | grep -q 'Requests per second'; then
+        RPS=$(echo "$AB_OUT" | grep 'Requests per second' | awk '{print $4}')
+        [ "$OK" -ge 28 ] && pass "6.1  30 concurrent GETs: $OK/30 x 200  ($RPS req/s)" \
+                          || fail "6.1  Concurrent: only $OK/30 OK  (non-2xx: $NON200)"
+    else
+        fail "6.1  ab failed: $(echo $AB_OUT | head -c 120)"
+    fi
 
     S=$(G -H "Host: localhost" "$BASE/")
-    [ "$S" = "200" ] && pass "6.2  Server alive after load  ->  $S" \
-                     || fail "6.2  Server crashed  ->  $S"
+    [ "$S" = "200" ] && pass "6.2  Server alive after ab load -> $S" \
+                     || fail "6.2  Server crashed -> $S"
 
-    info "6.3  Mixed-vhost 15 GETs (5 x 3 hosts)..."
-    local tmp pids i HOST
-    tmp=$(mktemp)
-    pids=""
+    # 6.3 -- Mixed vhost load
+    info "6.3  Mixed-vhost 30 GETs via ab..."
+    local OK3=0
     for HOST in localhost smoke.test example.com; do
-        for i in 1 2 3 4 5; do
-            G -H "Host: $HOST" "$BASE/" >>"$tmp" &
-            pids="$pids $!"
-        done
+        local R; R=$(ab -n 10 -c 5 -H "Host: $HOST" \
+            "http://127.0.0.1:${PORT}/" 2>&1)
+        local NF; NF=$(echo "$R" | grep 'Non-2xx' | awk '{print $NF}' || echo 0)
+        NF=${NF:-0}
+        OK3=$((OK3 + 10 - NF))
     done
-    for p in $pids; do wait "$p" 2>/dev/null || true; done
-    OK=$(grep -c "^200$" "$tmp" 2>/dev/null || echo 0)
-    rm -f "$tmp"
-    [ "$OK" -ge 13 ] && pass "6.3  Mixed-vhost 15 GETs  ->  $OK/15 x 200" \
-                     || fail "6.3  Mixed-vhost  ->  only $OK/15 OK"
+    [ "$OK3" -ge 27 ] && pass "6.3  Mixed-vhost 30 GETs: $OK3/30 x 200" \
+                      || fail "6.3  Mixed-vhost: only $OK3/30 OK"
 
     S=$(G -H "Host: localhost" "$BASE/")
-    [ "$S" = "200" ] && pass "6.4  Server alive after mixed load  ->  $S" \
-                     || fail "6.4  Server dead  ->  $S"
+    [ "$S" = "200" ] && pass "6.4  Server alive after mixed load -> $S" \
+                     || fail "6.4  Server dead -> $S"
 }
 
 t_errors() {

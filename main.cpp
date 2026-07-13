@@ -86,6 +86,17 @@ int main(int argc, char* argv[])
     config.backend_connect_timeout = server_config.backend_connect_timeout;
     config.backend_response_timeout = server_config.backend_response_timeout;
 
+    // Apply configured thread pool size (pool was created with a default at
+    // static-init time; resize it now that we know the real value).
+    {
+        std::size_t pool_sz = (server_config.thread_pool_size > 0)
+            ? static_cast<std::size_t>(server_config.thread_pool_size)
+            : static_cast<std::size_t>(std::thread::hardware_concurrency());
+        if (pool_sz < 4) pool_sz = 4;  // safety floor
+        global_thread_pool.resize(pool_sz);
+        std::cout << "[HTTP_Server] Thread pool: " << pool_sz << " workers\n";
+    }
+
     // Determine run mode (keep start/reverse for compatibility,
     // but the active architecture is site-config + K8s managed)
     std::string mode_arg = (argc >= 2) ? std::string(argv[1]) : "start";
