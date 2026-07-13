@@ -18,6 +18,14 @@ namespace fs = std::filesystem;
 
 Routing::Routing() {}
 
+static std::string stripQueryAndFragment(std::string path)
+{
+    auto pos = path.find_first_of("?#");
+    if (pos != std::string::npos)
+        path.erase(pos);
+    return path;
+}
+
 // ─────────────────────────────────────────────────────────────
 //  readAbsoluteFile — reads a file from an absolute path directly
 //  (bypasses FileManager::rootDirectory prepending)
@@ -39,20 +47,26 @@ std::string Routing::resolvePath(const std::string& domain,
                                   const std::string& url_path) const
 {
     std::string base;
+    std::string path = stripQueryAndFragment(url_path);
 
     if (domain.empty())
     {
-        // Fallback: legacy var/ root
-        base = config.root_dir;
+        // Fallback: legacy root layout keeps public files under
+        // <root_dir>/www/ while error pages live under <root_dir>/error/.
+        if (path.rfind("/error/", 0) == 0)
+            return config.root_dir + path;
+
+        base = config.root_dir + "/www";
     }
     else
     {
         base = server_config.sites_root + "/" + domain + "/public";
     }
 
-    std::string path = url_path;
     if (path.empty() || path == "/")
+    {
         path = "/index.html";
+    }
 
     return base + path;
 }

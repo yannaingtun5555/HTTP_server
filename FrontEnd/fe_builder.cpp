@@ -141,8 +141,29 @@ bool FrontendBuilder::build(const std::string& domain,
     }
     else // "none" or unknown — bare HTML copy
     {
-        log("No build step — copying files directly");
-        ok = copyDir(fe_folder, public_dir, error_out);
+        // Skip if public_dir already has content (preserves manually-placed files
+        // and files deployed by previous server runs / the admin panel)
+        bool dst_has_files = false;
+        if (fs::exists(public_dir) && fs::is_directory(public_dir))
+        {
+            for (auto& e : fs::directory_iterator(public_dir))
+            {
+                (void)e;
+                dst_has_files = true;
+                break;
+            }
+        }
+
+        if (dst_has_files)
+        {
+            log("No build step — public dir already populated, skipping copy");
+            ok = true;
+        }
+        else
+        {
+            log("No build step — copying files directly");
+            ok = copyDir(fe_folder, public_dir, error_out);
+        }
     }
 
 done:

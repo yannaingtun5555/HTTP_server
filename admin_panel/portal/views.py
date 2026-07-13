@@ -1,10 +1,11 @@
 import requests as http_requests
 from django.conf import settings
+from django.db import DatabaseError, OperationalError
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 
 from .forms import DbCredentialForm, SiteStep1Form
-from .models import BeContainer, DbContainer, Domain
+from .models import BeContainer, DbContainer, Domain, Page
 
 INTERNAL_API_URL = settings.INTERNAL_API_URL
 INTERNAL_API_SECRET = settings.INTERNAL_API_SECRET
@@ -12,8 +13,27 @@ INTERNAL_API_SECRET = settings.INTERNAL_API_SECRET
 
 def dashboard(request):
     """Show all domains ordered by most recently created."""
-    domains = Domain.objects.order_by('-created_at')
-    return render(request, 'portal/dashboard.html', {'domains': domains})
+    try:
+        domains = list(Domain.objects.order_by('-created_at'))
+        db_error = None
+    except (DatabaseError, OperationalError) as exc:
+        domains = []
+        db_error = (
+            'The admin database is not available yet. '
+            'The panel is running, but site data cannot be loaded.'
+        )
+        if settings.DEBUG:
+            db_error = f'{db_error} ({exc})'
+
+    return render(request, 'portal/dashboard.html', {
+        'domains': domains,
+        'db_error': db_error,
+    })
+
+
+def home(request):
+    """Simple landing page used to verify the Django container is healthy."""
+    return render(request, 'portal/home.html')
 
 
 def add_site_step1(request):
@@ -83,8 +103,7 @@ def deploy_site(request):
         'run_cmd': step1.get('run_cmd', ''),
         'be_port': step1.get('be_port', 3000),
         'fe_build': step1.get('fe_build', ''),
-        'db_count': step1.get('db_count', 0),
-        'databases': db_credentials,
+        'dbs': db_credentials,
     }
 
     result = {'success': False, 'error': '', 'data': {}}
@@ -98,7 +117,11 @@ def deploy_site(request):
         )
         if response.status_code == 200:
             result['success'] = True
-            result['data'] = response.json()
+            try:
+                result['data'] = response.json()
+            except ValueError:
+                result['data'] = {}
+                result['error'] = 'Deployment succeeded, but the API returned non-JSON output.'
         else:
             result['error'] = (
                 f'API returned {response.status_code}: {response.text[:500]}'
@@ -118,10 +141,12 @@ def site_detail(request, domain):
     site = get_object_or_404(Domain, domain=domain)
     db_containers = site.db_containers.all().order_by('id')
     be_container = site.be_containers.order_by('-id').first()
+    pages = site.pages.all().order_by('path')
     return render(request, 'portal/site_detail.html', {
         'site': site,
         'db_containers': db_containers,
         'be_container': be_container,
+        'pages': pages,
     })
 
 
@@ -159,6 +184,7 @@ def site_status(request, domain):
     site = get_object_or_404(Domain, domain=domain)
     db_containers = site.db_containers.all().order_by('id')
     be_container = site.be_containers.order_by('-id').first()
+    pages = site.pages.all().order_by('path')
 
     dbs = [
         {
@@ -187,4 +213,13 @@ def site_status(request, domain):
         'error_msg': site.error_msg,
         'dbs': dbs,
         'be': be_info,
+        'pages': [
+            {
+                'id': p.id,
+                'path': p.path,
+                'content_hash': p.content_hash,
+                'size_bytes': p.size_bytes,
+            }
+            for p in pages
+        ],
     })

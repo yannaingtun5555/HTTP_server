@@ -16,7 +16,7 @@ fi
 LOG_FILE="./logs/temp.log"
 PID_FILE="./HTTP_Server.pid"
 MODE_FILE="./HTTP_Server.mode"
-CONFIG_FILE="./config.txt"
+CONFIG_FILE="./server.conf"
 LOGS_DIR="./logs/server_log"
 WEB_ROOT="/var/www/html"
 

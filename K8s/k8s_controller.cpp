@@ -439,7 +439,8 @@ std::string K8sController::buildBeDeploymentJson(const SiteEntry& site,
     }
     env_arr += "]";
 
-    std::string run_cmd_json = R"(["/bin/sh","-c",")" + site.run_cmd + R"("])";
+    std::string shell_cmd = "cd /app && " + site.run_cmd;
+    std::string run_cmd_json = R"(["/bin/sh","-c",")" + shell_cmd + R"("])";
 
     return R"({
     "apiVersion": "apps/v1",
@@ -455,6 +456,7 @@ std::string K8sController::buildBeDeploymentJson(const SiteEntry& site,
                     "name": "be",
                     "image": ")" + image + R"(",
                     "command": )" + run_cmd_json + R"(,
+                    "workingDir": "/app",
                     "ports": [{"containerPort": )" + std::to_string(site.be_port) + R"(}],
                     "env": )" + env_arr + R"(,
                     "volumeMounts": [{

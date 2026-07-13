@@ -75,3 +75,23 @@ class BeContainer(models.Model):
 
     def __str__(self):
         return f'{self.domain.domain} / be'
+
+
+class Page(models.Model):
+    domain = models.ForeignKey(
+        Domain,
+        on_delete=models.CASCADE,
+        db_column='domain_id',
+        related_name='pages',
+    )
+    path = models.CharField(max_length=1024)
+    content_hash = models.CharField(max_length=255, blank=True)
+    size_bytes = models.BigIntegerField(null=True, blank=True)
+    built_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        managed = False
+        db_table = 'pages'
+
+    def __str__(self):
+        return f'{self.domain.domain} {self.path}'

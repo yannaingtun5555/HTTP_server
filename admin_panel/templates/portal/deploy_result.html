@@ -31,24 +31,20 @@
   </dl>
   {% endif %}
 
-  {% if result.data.databases %}
+  {% if result.data.connection_strings %}
   <div class="card-title mt-3">Database Connection Strings</div>
   <table>
     <thead>
       <tr>
         <th>Alias</th>
-        <th>Type</th>
         <th>Connection String</th>
-        <th>Status</th>
       </tr>
     </thead>
     <tbody>
-      {% for db in result.data.databases %}
+      {% for db in result.data.connection_strings %}
       <tr>
         <td>{{ db.alias }}</td>
-        <td>{{ db.type }}</td>
-        <td><code class="conn">{{ db.connection_str }}</code></td>
-        <td><span class="badge badge-{{ db.status }}">{{ db.status }}</span></td>
+        <td><code class="conn">{{ db.conn_str }}</code></td>
       </tr>
       {% endfor %}
     </tbody>

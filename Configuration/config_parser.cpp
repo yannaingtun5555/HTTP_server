@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <algorithm>
 #include <map>
+#include <filesystem>
 
 using namespace std;
 
@@ -31,7 +32,7 @@ void Config::load(const string& file_path)
 
             def_config_file << "server_host=0.0.0.0\n";
             def_config_file << "server_port=8000\n";
-            def_config_file << "root_dir=/var/www\n";
+            def_config_file << "root_dir=./var\n";
 
             Monitoring::log_info(true,"-","Default configuration file created.");
         } 
@@ -41,9 +42,18 @@ void Config::load(const string& file_path)
             Monitoring::log_error("-","Error on creation of the default configuration file.");
             return;
         }
+
+        config_file.open(file_path);
+        if (!config_file.is_open())
+        {
+            Monitoring::log_error("-", "Failed to reopen configuration file after creating defaults.");
+            return;
+        }
      }            
 
     Monitoring::log_info(true,"-","Configuration file opened successfully.");
+
+    backends.clear();
 
     // Temporary map to accumulate backend fields keyed by backend name
     // e.g.  partial_backends["api"]["host"] = "127.0.0.1"
@@ -115,37 +125,23 @@ void Config::load(const string& file_path)
         }
     }
 
-    ifstream root(root_dir);
-
-    if (!root.is_open())
+    std::filesystem::path root_path(root_dir);
+    if (!std::filesystem::exists(root_path) || !std::filesystem::is_directory(root_path))
     {
-        General_error(true, "Error in opening root directory!", WARNING);
-        Monitoring::log_error("-","Error in opening root directory.");
-        std::string dir_path;
-        std::cout << "Enter the root directory path to continue the server: ";
-        std::getline(std::cin, dir_path);
-
-        std::filesystem::path dir(dir_path);
-
-        if (std::filesystem::exists(dir) && std::filesystem::is_directory(dir)) 
+        try
         {
-            std::string dir_found= "Directory found:"+ dir_path;
-            Monitoring::log_info(true,"-",dir_found);
-            root_dir = dir_path;
+            std::filesystem::create_directories(root_path);
+            Monitoring::log_info(true, "-", "Created missing root directory at " + root_dir);
         }
-        else
+        catch (const std::exception& e)
         {
-            std::cerr << "Directory not found: " << dir << std::endl;
-            General_error(true, "Root directory loading failed: path not found!", ERROR);
-            Monitoring::log_error("-","Root directory loading failed: path not found.");
+            General_error(true, "Root directory loading failed: " + std::string(e.what()), ERROR);
+            Monitoring::log_error("-", "Root directory loading failed: " + std::string(e.what()));
             return;
         }
     }
-    
-    else 
-    {
-        Monitoring::log_info(true,"-","The root directory is opened at " + root_dir);
-    }
+
+    Monitoring::log_info(true,"-","The root directory is available at " + root_dir);
 }
 
 // Find the backend whose path_prefix is the longest prefix of `path`.
@@ -173,4 +169,3 @@ const BackendConfig* Config::matchBackend(const std::string& path) const
     }
     return best;
 }
-

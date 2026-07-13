@@ -45,6 +45,13 @@ void Request_handler::handleRequest(
 
     std::string target(req->target().data(), req->target().size());
     std::string host = extractHost(*req);
+    std::string static_domain;
+
+    SiteEntry matched_site;
+    if (!host.empty() && site_config.findSite(host, matched_site))
+    {
+        static_domain = matched_site.domain;
+    }
 
     // ── 1. Internal API (/_api/internal/...) ─────────────────
     const std::string& int_prefix = server_config.internal_api_path_prefix;
@@ -67,27 +74,53 @@ void Request_handler::handleRequest(
     if (target.rfind(admin_prefix, 0) == 0)
     {
         auto client_session = session;
-        boost::asio::post(io_context, [req, client_session]()
+        BackendConfig admin_backend;
+        admin_backend.name = "admin";
+        admin_backend.host = server_config.admin_backend_host;
+        admin_backend.port = server_config.admin_backend_port;
+        admin_backend.path_prefix = admin_prefix;
+        boost::asio::post(io_context, [req, client_session, admin_backend]()
         {
-            // Reuse ProxyHandler but point at admin backend
-            ProxyHandler handler;
-            handler.forwardRequest(req, client_session);
+            try {
+                ProxyHandler handler;
+                handler.forwardRequest(req, client_session, admin_backend);
+            } catch (...) {
+                // Backend unavailable — socket already handled inside ProxySession
+            }
         });
         return;
     }
 
-    // ── 3. API path (/api/<domain>/...) → proxy to BE pod ────
+    // ── 3. Site API path (/api/...) → proxy to the site's BE pod ────
     if (target.rfind("/api/", 0) == 0)
     {
-        // The ProxyHandler uses config.backends (legacy) for now.
-        // In the new design, the C++ server sets backend entries
-        // dynamically when a site is deployed. ProxyHandler reads
-        // `config.backends` which gets updated by the deploy pipeline.
-        auto client_session = session;
-        boost::asio::post(io_context, [req, client_session]()
+        if (static_domain.empty() || matched_site.be_cluster_host.empty() || matched_site.be_cluster_port == 0)
         {
-            ProxyHandler handler;
-            handler.forwardRequest(req, client_session);
+            auto res = boost::beast::http::response<boost::beast::http::string_body>();
+            res.version(req->version());
+            res.result(boost::beast::http::status::service_unavailable);
+            res.set(boost::beast::http::field::server, "HTTP_Server");
+            res.set(boost::beast::http::field::content_type, "text/plain");
+            res.keep_alive(req->keep_alive());
+            res.body() = "503 Service Unavailable: backend is not deployed";
+            res.prepare_payload();
+            boost::beast::http::write(session->socket(), res);
+            if (req->keep_alive()) session->do_read();
+            return;
+        }
+
+        auto client_session = session;
+        BackendConfig backend;
+        backend.name = matched_site.domain;
+        backend.host = matched_site.be_cluster_host;
+        backend.port = matched_site.be_cluster_port;
+        backend.path_prefix = "/api";
+        boost::asio::post(io_context, [req, client_session, backend]()
+        {
+            try {
+                ProxyHandler handler;
+                handler.forwardRequest(req, client_session, backend);
+            } catch (...) {}
         });
         return;
     }
@@ -96,12 +129,12 @@ void Request_handler::handleRequest(
     // Route to the domain's public folder
     if (isValidRequest(*req))
     {
-        routing.processRequest(true, *req, session, host);
+        routing.processRequest(true, *req, session, static_domain);
     }
     else
     {
         // Invalid path (e.g. bare "/") → serve index.html for the domain
-        routing.processRequest(false, *req, session, host);
+        routing.processRequest(false, *req, session, static_domain);
     }
 }
 

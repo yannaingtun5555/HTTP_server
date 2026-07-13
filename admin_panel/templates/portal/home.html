@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}Django Container Health Check{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1>Django Container Running</h1>
+  <a href="/_admin/" class="btn btn-primary">Open Admin Panel</a>
+</div>
+
+<div class="card" style="max-width:760px;">
+  <div class="card-title">Default Page</div>
+  <p class="mb-1">
+    The Django application is up, the container is serving requests, and the admin panel is available under <code class="conn">/_admin/</code>.
+  </p>
+  <p class="text-muted">
+    This landing page is intentionally lightweight so it can be used as a safe smoke test even when the database is still starting.
+  </p>
+</div>
+{% endblock %}

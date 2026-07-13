@@ -168,10 +168,10 @@ public:
     ProxySession(
         std::shared_ptr<http::request<http::dynamic_body>> client_req,
         std::shared_ptr<Session> session,
-        const BackendConfig& backend)
+        BackendConfig backend)
         : client_req_(std::move(client_req))
         , session_(std::move(session))
-        , backend_(backend)
+        , backend_(std::move(backend))
         , resolver_(io_context)
         , resolve_timer_(io_context)
         , backend_stream_(BackendConnectionPool::instance().acquire(
@@ -497,7 +497,7 @@ private:
 
     std::shared_ptr<http::request<http::dynamic_body>> client_req_;
     std::shared_ptr<Session> session_;
-    const BackendConfig& backend_;
+    BackendConfig backend_;   // stored by value — avoids dangling ref
     std::string client_ip_;
     std::string method_;
     std::string path_;
@@ -587,5 +587,14 @@ void ProxyHandler::forwardRequest(
     }
 
     auto proxy = std::make_shared<ProxySession>(std::move(req), std::move(session), *backend);
+    proxy->start();
+}
+
+void ProxyHandler::forwardRequest(
+    std::shared_ptr<http::request<http::dynamic_body>> req,
+    std::shared_ptr<Session> session,
+    const BackendConfig& backend)
+{
+    auto proxy = std::make_shared<ProxySession>(std::move(req), std::move(session), backend);
     proxy->start();
 }

@@ -91,7 +91,7 @@ USE_I18N = True
 USE_TZ = True
 
 # Internal API settings
-INTERNAL_API_URL = os.environ.get('INTERNAL_API_URL', 'http://127.0.0.1:80/_api/internal')
+INTERNAL_API_URL = os.environ.get('INTERNAL_API_URL', 'http://127.0.0.1:8000/_api/internal')
 INTERNAL_API_SECRET = os.environ.get('INTERNAL_API_SECRET', 'changeme-secret')
 
 # Default primary key field type

@@ -24,6 +24,15 @@ struct DomainRecord
     std::string error_msg;
 };
 
+struct PageRecord
+{
+    int         id          = 0;
+    int         domain_id   = 0;
+    std::string path;
+    std::string content_hash;
+    long long   size_bytes  = 0;
+};
+
 struct DbContainerRecord
 {
     int         id          = 0;
@@ -64,9 +73,11 @@ public:
     // Connect and run schema.sql if tables are missing
     bool connect(const std::string& conn_string, const std::string& schema_sql_path);
     void disconnect();
+    bool isConnected() const { return connected_; }
 
     // ── domains ──────────────────────────────────────────────
     int  insertDomain(const DomainRecord& d);
+    bool upsertDomain(const DomainRecord& d);
     bool updateDomainStatus(int id, const std::string& status, const std::string& error = "");
     bool getDomain(const std::string& domain, DomainRecord& out);
     std::vector<DomainRecord> allDomains();
@@ -82,11 +93,18 @@ public:
     bool updateBeContainer(const BeContainerRecord& r);
     bool getBeContainer(int domain_id, BeContainerRecord& out);
 
+    // ── pages ────────────────────────────────────────────────
+    bool clearPagesForDomain(int domain_id);
+    bool upsertPage(const PageRecord& p);
+    std::vector<PageRecord> pagesForDomain(int domain_id);
+
 private:
     std::unique_ptr<pqxx::connection> conn_;
+    bool connected_ = false;
 
     void runSchemaFile(const std::string& path);
     std::string readFile(const std::string& path);
+    bool ready() const;
 };
 
 extern ServerDB server_db;

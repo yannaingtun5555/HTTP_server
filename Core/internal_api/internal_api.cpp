@@ -11,10 +11,88 @@
 #include <iostream>
 #include <filesystem>
 #include <map>
+#include <fstream>
+#include <sstream>
+#include <iomanip>
+#include <cstdint>
+#include <algorithm>
 
 namespace beast = boost::beast;
 namespace http  = beast::http;
 namespace fs    = std::filesystem;
+
+namespace {
+
+static std::string fnv1a64Hex(const std::string& data)
+{
+    std::uint64_t hash = 1469598103934665603ULL;
+    for (unsigned char c : data)
+    {
+        hash ^= c;
+        hash *= 1099511628211ULL;
+    }
+    std::ostringstream oss;
+    oss << std::hex << hash;
+    return oss.str();
+}
+
+static void recordPagesInDirectory(int domain_id,
+                                   const std::filesystem::path& public_dir)
+{
+    if (!fs::exists(public_dir) || !fs::is_directory(public_dir))
+        return;
+
+    server_db.clearPagesForDomain(domain_id);
+
+    for (const auto& entry : fs::recursive_directory_iterator(public_dir))
+    {
+        if (!entry.is_regular_file())
+            continue;
+
+        std::ifstream file(entry.path(), std::ios::binary);
+        if (!file.is_open())
+            continue;
+
+        std::ostringstream ss;
+        ss << file.rdbuf();
+        std::string content = ss.str();
+
+        PageRecord p;
+        p.domain_id    = domain_id;
+        p.path         = "/" + fs::relative(entry.path(), public_dir).generic_string();
+        p.content_hash = fnv1a64Hex(content);
+        p.size_bytes   = static_cast<long long>(content.size());
+        server_db.upsertPage(p);
+    }
+}
+
+static Json::Value parseDbArray(const Json::Value& root, std::vector<std::pair<std::string,std::string>>& db_creds)
+{
+    const Json::Value* dbs_json = nullptr;
+    if (root.isMember("dbs"))
+        dbs_json = &root["dbs"];
+    else if (root.isMember("databases"))
+        dbs_json = &root["databases"];
+
+    Json::Value site_dbs(Json::arrayValue);
+    if (dbs_json && dbs_json->isArray())
+    {
+        for (const auto& d : *dbs_json)
+        {
+            Json::Value clean;
+            clean["db_alias"] = d.get("db_alias", d.get("alias", "")).asString();
+            clean["db_type"]  = d.get("db_type", d.get("type", "postgres")).asString();
+            clean["db_name"]  = d.get("db_name", "").asString();
+            site_dbs.append(clean);
+            db_creds.push_back({
+                d.get("db_user", "admin").asString(),
+                d.get("db_password", "changeme").asString()
+            });
+        }
+    }
+    return site_dbs;
+}
+} // namespace
 
 // ─────────────────────────────────────────────────────────────
 //  makeJson helper
@@ -50,11 +128,22 @@ InternalApiHandler::handle(const http::request<http::dynamic_body>& req,
     if (secret_it == req.end() ||
         std::string(secret_it->value()) != expected_secret)
     {
-        return makeJson(403, R"({"success":false,"error":"Forbidden"})", ver, keep);
+        return makeJson(401, R"({"success":false,"error":"Unauthorized"})", ver, keep);
     }
 
     // ── Route ─────────────────────────────────────────────────
     std::string method(req.method_string());
+
+    // Bare health/status endpoint (no domain required)
+    if ((path_suffix == "/status" || path_suffix.empty()) && method == "GET")
+    {
+        Json::Value jv;
+        jv["success"] = true;
+        jv["server"]  = "HTTP_Server";
+        jv["db"]      = server_db.isConnected() ? "ok" : "unavailable";
+        Json::FastWriter fw;
+        return makeJson(200, fw.write(jv), ver, keep);
+    }
 
     if (path_suffix == "/deploy" && method == "POST")
         return handleDeploy(req, ver, keep);
@@ -117,19 +206,16 @@ InternalApiHandler::handleDeploy(const http::request<http::dynamic_body>& req,
 
     // Build DB entries and credential map
     std::vector<std::pair<std::string,std::string>> db_creds; // user, password per DB
-    const Json::Value& dbs_json = root["dbs"];
-    for (const auto& d : dbs_json)
+    Json::Value site_dbs = parseDbArray(root, db_creds);
+    for (const auto& d : site_dbs)
     {
         DbEntry db;
         db.alias   = d.get("db_alias", "").asString();
         db.type    = d.get("db_type", "postgres").asString();
         db.db_name = d.get("db_name", "").asString();
         site.dbs.push_back(db);
-        db_creds.push_back({
-            d.get("db_user", "admin").asString(),
-            d.get("db_password", "changeme").asString()
-        });
     }
+    site.db_count = static_cast<unsigned int>(site.dbs.size());
 
     std::string error_out;
     std::string conn_json;
@@ -137,9 +223,31 @@ InternalApiHandler::handleDeploy(const http::request<http::dynamic_body>& req,
 
     if (ok)
     {
-        return makeJson(200,
-            R"({"success":true,"connection_strings":)" + conn_json + R"(})",
-            http_version, keep_alive);
+        DomainRecord dr;
+        BeContainerRecord bec;
+        server_db.getDomain(site.domain, dr);
+        if (dr.id != 0)
+            server_db.getBeContainer(dr.id, bec);
+
+        Json::Value ok_root;
+        ok_root["success"] = true;
+        ok_root["domain"] = site.domain;
+        ok_root["be_status"] = bec.status.empty() ? (site.be_type == "static" ? "skipped" : "running")
+                                                   : bec.status;
+        ok_root["be_host"] = bec.be_host;
+        ok_root["be_port"] = (bec.status == "skipped") ? 0 : bec.be_port;
+
+        Json::Reader r;
+        Json::Value conn_val;
+        if (r.parse(conn_json, conn_val))
+            ok_root["connection_strings"] = conn_val;
+        else
+            ok_root["connection_strings"] = Json::arrayValue;
+
+        Json::FastWriter w;
+        std::string body = w.write(ok_root);
+        body.erase(std::remove(body.begin(), body.end(), '\n'), body.end());
+        return makeJson(200, body, http_version, keep_alive);
     }
     else
     {
@@ -176,15 +284,21 @@ bool InternalApiHandler::runDeploy(
     dr.db_count   = static_cast<int>(site.dbs.size());
     dr.status     = "building";
 
-    int domain_id = server_db.insertDomain(dr);
-    if (domain_id < 0)
+    if (!server_db.upsertDomain(dr))
     {
         error_out = "Failed to insert domain into server DB";
         return false;
     }
 
-    // 2) Build FE (background thread, but we wait via a future since
-    //    the deploy response needs to know the result)
+    DomainRecord stored;
+    if (!server_db.getDomain(site.domain, stored))
+    {
+        error_out = "Unable to load domain row after upsert";
+        return false;
+    }
+    int domain_id = stored.id;
+
+    // 2) Build FE into the public folder
     std::string public_dir = server_config.sites_root + "/" + site.domain + "/public";
     std::string fe_error;
     bool fe_ok = FrontendBuilder::build(
@@ -196,12 +310,20 @@ bool InternalApiHandler::runDeploy(
         return false;
     }
 
+    recordPagesInDirectory(domain_id, public_dir);
+
     // 3) Spin up DB containers one by one
     std::map<std::string, std::string> conn_env; // env-var-name → conn string
     Json::Value conn_arr(Json::arrayValue);
 
     for (std::size_t i = 0; i < site.dbs.size(); ++i)
     {
+        if (i >= db_creds.size())
+        {
+            error_out = "Missing DB credentials for one or more databases";
+            server_db.updateDomainStatus(domain_id, "error", error_out);
+            return false;
+        }
         const DbEntry& db   = site.dbs[i];
         const auto& [u, p]  = db_creds[i];
 
@@ -243,26 +365,39 @@ bool InternalApiHandler::runDeploy(
     // 4) Spin up BE container
     BeContainerRecord bec;
     bec.domain_id = domain_id;
-    bec.be_port   = static_cast<int>(site.be_port);
+    bec.be_port   = (site.be_type == "static" || site.run_cmd.empty())
+                    ? 0
+                    : static_cast<int>(site.be_port);
     bec.status    = "pending";
-    bec.id        = server_db.insertBeContainer(bec);
 
-    std::string pod_name = k8s_controller.spinUpBeContainer(site, conn_env, bec);
-    if (pod_name.empty())
+    if (site.be_type == "static" || site.run_cmd.empty())
     {
+        bec.status = "skipped";
+        bec.id = server_db.insertBeContainer(bec);
         server_db.updateBeContainer(bec);
-        server_db.updateDomainStatus(domain_id, "error",
-            "BE container failed: " + bec.error_log);
-        error_out = "BE container failed to start:\n" + bec.error_log;
-        return false;
     }
+    else
+    {
+        bec.id = server_db.insertBeContainer(bec);
 
-    server_db.updateBeContainer(bec);
+        std::string pod_name = k8s_controller.spinUpBeContainer(site, conn_env, bec);
+        if (pod_name.empty())
+        {
+            server_db.updateBeContainer(bec);
+            server_db.updateDomainStatus(domain_id, "error",
+                "BE container failed: " + bec.error_log);
+            error_out = "BE container failed to start:\n" + bec.error_log;
+            return false;
+        }
+
+        server_db.updateBeContainer(bec);
+    }
 
     // 5) Update in-memory site routing (set cluster BE host/port)
     SiteEntry updated = site;
-    updated.be_cluster_host = bec.be_host;
-    updated.be_cluster_port = static_cast<unsigned int>(bec.be_port);
+    updated.be_cluster_host = (bec.status == "skipped") ? "" : bec.be_host;
+    updated.be_cluster_port = (bec.status == "skipped") ? 0u : static_cast<unsigned int>(bec.be_port);
+    updated.db_count        = static_cast<unsigned int>(site.dbs.size());
     site_config.writeSite("sites.conf", updated);
 
     // 6) Mark domain running

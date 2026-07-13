@@ -117,6 +117,35 @@
   {% endif %}
 </div>
 
+<!-- Pages -->
+<div class="card" style="padding:0;overflow:hidden;">
+  <div class="card-title" style="padding:1rem 1.5rem 0;">Built Pages</div>
+  {% if pages %}
+  <table>
+    <thead>
+      <tr>
+        <th>Path</th>
+        <th>Size</th>
+        <th>Content Hash</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for page in pages %}
+      <tr>
+        <td><code class="conn">{{ page.path }}</code></td>
+        <td>{{ page.size_bytes|default:"—" }}</td>
+        <td><code class="conn-masked">{{ page.content_hash|default:"—" }}</code></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state" style="padding:2rem;">
+    <p class="text-muted">No page metadata recorded yet.</p>
+  </div>
+  {% endif %}
+</div>
+
 <!-- Auto-refresh polling script -->
 <script>
 (function () {

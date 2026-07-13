@@ -6,6 +6,11 @@
 // Global instance
 ServerDB server_db;
 
+bool ServerDB::ready() const
+{
+    return conn_ && conn_->is_open() && connected_;
+}
+
 // ─────────────────────────────────────────────────────────────
 std::string ServerDB::readFile(const std::string& path)
 {
@@ -47,15 +52,18 @@ bool ServerDB::connect(const std::string& conn_string,
         if (!conn_->is_open())
         {
             std::cerr << "[ServerDB] Connection failed\n";
+            connected_ = false;
             return false;
         }
         std::cout << "[ServerDB] Connected to " << conn_->dbname() << "\n";
         runSchemaFile(schema_sql_path);
+        connected_ = true;
         return true;
     }
     catch (const std::exception& e)
     {
         std::cerr << "[ServerDB] connect() error: " << e.what() << "\n";
+        connected_ = false;
         return false;
     }
 }
@@ -63,6 +71,7 @@ bool ServerDB::connect(const std::string& conn_string,
 void ServerDB::disconnect()
 {
     conn_.reset();
+    connected_ = false;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -70,6 +79,7 @@ void ServerDB::disconnect()
 // ─────────────────────────────────────────────────────────────
 int ServerDB::insertDomain(const DomainRecord& d)
 {
+    if (!ready()) return -1;
     try
     {
         pqxx::work txn(*conn_);
@@ -90,9 +100,44 @@ int ServerDB::insertDomain(const DomainRecord& d)
     }
 }
 
+bool ServerDB::upsertDomain(const DomainRecord& d)
+{
+    if (!ready()) return false;
+    try
+    {
+        pqxx::work txn(*conn_);
+        txn.exec_params(
+            "INSERT INTO domains(domain,user_owner,fe_folder,be_folder,"
+            "be_type,run_cmd,be_port,fe_build,db_count,status,error_msg)"
+            " VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)"
+            " ON CONFLICT (domain) DO UPDATE SET"
+            " user_owner=EXCLUDED.user_owner,"
+            " fe_folder=EXCLUDED.fe_folder,"
+            " be_folder=EXCLUDED.be_folder,"
+            " be_type=EXCLUDED.be_type,"
+            " run_cmd=EXCLUDED.run_cmd,"
+            " be_port=EXCLUDED.be_port,"
+            " fe_build=EXCLUDED.fe_build,"
+            " db_count=EXCLUDED.db_count,"
+            " status=EXCLUDED.status,"
+            " error_msg=EXCLUDED.error_msg",
+            d.domain, d.user_owner, d.fe_folder, d.be_folder, d.be_type,
+            d.run_cmd, d.be_port, d.fe_build, d.db_count,
+            d.status.empty() ? "pending" : d.status, d.error_msg);
+        txn.commit();
+        return true;
+    }
+    catch (const std::exception& e)
+    {
+        std::cerr << "[ServerDB] upsertDomain: " << e.what() << "\n";
+        return false;
+    }
+}
+
 bool ServerDB::updateDomainStatus(int id, const std::string& status,
                                   const std::string& error)
 {
+    if (!ready()) return false;
     try
     {
         pqxx::work txn(*conn_);
@@ -111,6 +156,7 @@ bool ServerDB::updateDomainStatus(int id, const std::string& status,
 
 bool ServerDB::getDomain(const std::string& domain, DomainRecord& out)
 {
+    if (!ready()) return false;
     try
     {
         pqxx::work txn(*conn_);
@@ -145,6 +191,7 @@ bool ServerDB::getDomain(const std::string& domain, DomainRecord& out)
 std::vector<DomainRecord> ServerDB::allDomains()
 {
     std::vector<DomainRecord> result;
+    if (!ready()) return result;
     try
     {
         pqxx::work txn(*conn_);
@@ -180,6 +227,7 @@ std::vector<DomainRecord> ServerDB::allDomains()
 
 bool ServerDB::deleteDomain(int id)
 {
+    if (!ready()) return false;
     try
     {
         pqxx::work txn(*conn_);
@@ -195,10 +243,85 @@ bool ServerDB::deleteDomain(int id)
 }
 
 // ─────────────────────────────────────────────────────────────
+//  pages
+// ─────────────────────────────────────────────────────────────
+bool ServerDB::clearPagesForDomain(int domain_id)
+{
+    if (!ready()) return false;
+    try
+    {
+        pqxx::work txn(*conn_);
+        txn.exec_params("DELETE FROM pages WHERE domain_id=$1", domain_id);
+        txn.commit();
+        return true;
+    }
+    catch (const std::exception& e)
+    {
+        std::cerr << "[ServerDB] clearPagesForDomain: " << e.what() << "\n";
+        return false;
+    }
+}
+
+bool ServerDB::upsertPage(const PageRecord& p)
+{
+    if (!ready()) return false;
+    try
+    {
+        pqxx::work txn(*conn_);
+        txn.exec_params(
+            "INSERT INTO pages(domain_id,path,content_hash,size_bytes)"
+            " VALUES($1,$2,$3,$4)"
+            " ON CONFLICT (domain_id, path) DO UPDATE SET"
+            " content_hash=EXCLUDED.content_hash,"
+            " size_bytes=EXCLUDED.size_bytes,"
+            " built_at=NOW()",
+            p.domain_id, p.path, p.content_hash, p.size_bytes);
+        txn.commit();
+        return true;
+    }
+    catch (const std::exception& e)
+    {
+        std::cerr << "[ServerDB] upsertPage: " << e.what() << "\n";
+        return false;
+    }
+}
+
+std::vector<PageRecord> ServerDB::pagesForDomain(int domain_id)
+{
+    std::vector<PageRecord> result;
+    if (!ready()) return result;
+    try
+    {
+        pqxx::work txn(*conn_);
+        auto rows = txn.exec_params(
+            "SELECT id,domain_id,path,content_hash,size_bytes FROM pages"
+            " WHERE domain_id=$1 ORDER BY path",
+            domain_id);
+        txn.commit();
+        for (const auto& row : rows)
+        {
+            PageRecord p;
+            p.id           = row[0].as<int>();
+            p.domain_id    = row[1].as<int>();
+            p.path         = row[2].is_null() ? "" : row[2].as<std::string>();
+            p.content_hash = row[3].is_null() ? "" : row[3].as<std::string>();
+            p.size_bytes   = row[4].is_null() ? 0 : row[4].as<long long>();
+            result.push_back(p);
+        }
+    }
+    catch (const std::exception& e)
+    {
+        std::cerr << "[ServerDB] pagesForDomain: " << e.what() << "\n";
+    }
+    return result;
+}
+
+// ─────────────────────────────────────────────────────────────
 //  db_containers
 // ─────────────────────────────────────────────────────────────
 int ServerDB::insertDbContainer(const DbContainerRecord& r)
 {
+    if (!ready()) return -1;
     try
     {
         pqxx::work txn(*conn_);
@@ -221,6 +344,7 @@ int ServerDB::insertDbContainer(const DbContainerRecord& r)
 
 bool ServerDB::updateDbContainer(const DbContainerRecord& r)
 {
+    if (!ready()) return false;
     try
     {
         pqxx::work txn(*conn_);
@@ -243,6 +367,7 @@ bool ServerDB::updateDbContainer(const DbContainerRecord& r)
 std::vector<DbContainerRecord> ServerDB::dbContainersForDomain(int domain_id)
 {
     std::vector<DbContainerRecord> result;
+    if (!ready()) return result;
     try
     {
         pqxx::work txn(*conn_);
@@ -282,6 +407,7 @@ std::vector<DbContainerRecord> ServerDB::dbContainersForDomain(int domain_id)
 // ─────────────────────────────────────────────────────────────
 int ServerDB::insertBeContainer(const BeContainerRecord& r)
 {
+    if (!ready()) return -1;
     try
     {
         pqxx::work txn(*conn_);
@@ -304,6 +430,7 @@ int ServerDB::insertBeContainer(const BeContainerRecord& r)
 
 bool ServerDB::updateBeContainer(const BeContainerRecord& r)
 {
+    if (!ready()) return false;
     try
     {
         pqxx::work txn(*conn_);
@@ -323,6 +450,7 @@ bool ServerDB::updateBeContainer(const BeContainerRecord& r)
 
 bool ServerDB::getBeContainer(int domain_id, BeContainerRecord& out)
 {
+    if (!ready()) return false;
     try
     {
         pqxx::work txn(*conn_);

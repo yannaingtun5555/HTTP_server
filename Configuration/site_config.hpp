@@ -29,6 +29,7 @@ struct SiteEntry
     std::string run_cmd;
     unsigned int be_port  = 3000;
     std::string fe_build; // npm | vite | next | hugo | none
+    unsigned int db_count = 0;
     std::vector<DbEntry> dbs;
 
     // Runtime-populated after K8s deployment
