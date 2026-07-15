@@ -153,6 +153,114 @@ std::string K8sController::curlDelete(const std::string& url)
 }
 
 // ─────────────────────────────────────────────────────────────
+//  checkApiResponse — validates K8s API JSON response
+//  Returns true if the response indicates success; logs
+//  detailed error messages with context on failure.
+// ─────────────────────────────────────────────────────────────
+bool K8sController::checkApiResponse(const std::string& response,
+                                      const std::string& context)
+{
+    if (response.empty())
+    {
+        std::cerr << "[K8sController] " << context
+                  << ": empty response (network error or timeout)\n";
+        return false;
+    }
+
+    // Parse the response to check for K8s API error indicators
+    Json::Value root;
+    Json::CharReaderBuilder builder;
+    std::string errs;
+    std::istringstream stream(response);
+
+    if (!Json::parseFromStream(builder, stream, &root, &errs))
+    {
+        // If we can't parse JSON, check for raw error indicators
+        if (response.find("\"status\":\"Failure\"") != std::string::npos ||
+            response.find("\"kind\":\"Status\"") != std::string::npos)
+        {
+            std::cerr << "[K8sController] " << context
+                      << ": API error (unparseable): " << response.substr(0, 300) << "\n";
+            return false;
+        }
+        // Some responses (e.g., logs) are not JSON — treat as success
+        return true;
+    }
+
+    // Check for K8s Status object indicating failure
+    if (root.isMember("kind") && root["kind"].asString() == "Status")
+    {
+        std::string status = root.isMember("status") ? root["status"].asString() : "";
+        if (status == "Failure")
+        {
+            int code = root.isMember("code") ? root["code"].asInt() : 0;
+            std::string message = root.isMember("message") ? root["message"].asString() : "unknown";
+            std::string reason  = root.isMember("reason")  ? root["reason"].asString()  : "unknown";
+
+            // 409 Conflict (AlreadyExists) is not a fatal error for idempotent creates
+            if (code == 409 && reason == "AlreadyExists")
+            {
+                std::cout << "[K8sController] " << context
+                          << ": resource already exists (idempotent OK)\n";
+                return true;
+            }
+
+            std::cerr << "[K8sController] " << context
+                      << ": API error " << code << " (" << reason << "): " << message << "\n";
+            return false;
+        }
+    }
+
+    return true;
+}
+
+// ─────────────────────────────────────────────────────────────
+//  lookupResourceTier — fetches per-tenant resource specs
+//  First tries the master database, falls back to sites.conf,
+//  returns defaults if neither has custom values.
+// ─────────────────────────────────────────────────────────────
+ResourceTier K8sController::lookupResourceTier(const std::string& domain)
+{
+    ResourceTier tier;
+
+    // Try master database first
+    DomainRecord dr;
+    if (server_db.isConnected() && server_db.getDomain(domain, dr))
+    {
+        tier.db_max_cpu    = dr.db_max_cpu;
+        tier.db_max_memory = dr.db_max_memory;
+        tier.db_storage_gb = dr.db_storage_gb;
+        tier.be_max_cpu    = dr.be_max_cpu;
+        tier.be_max_memory = dr.be_max_memory;
+        std::cout << "[K8sController] Resource tier from DB for " << domain
+                  << ": db=" << tier.db_max_cpu << "/" << tier.db_max_memory
+                  << " be=" << tier.be_max_cpu << "/" << tier.be_max_memory
+                  << " storage=" << tier.db_storage_gb << "Gi\n";
+        return tier;
+    }
+
+    // Fall back to sites.conf
+    SiteEntry site;
+    if (site_config.findSite(domain, site))
+    {
+        tier.db_max_cpu    = site.db_max_cpu;
+        tier.db_max_memory = site.db_max_memory;
+        tier.db_storage_gb = site.db_storage_gb;
+        tier.be_max_cpu    = site.be_max_cpu;
+        tier.be_max_memory = site.be_max_memory;
+        std::cout << "[K8sController] Resource tier from config for " << domain
+                  << ": db=" << tier.db_max_cpu << "/" << tier.db_max_memory
+                  << " be=" << tier.be_max_cpu << "/" << tier.be_max_memory
+                  << " storage=" << tier.db_storage_gb << "Gi\n";
+        return tier;
+    }
+
+    // Return defaults
+    std::cout << "[K8sController] Using default resource tier for " << domain << "\n";
+    return tier;
+}
+
+// ─────────────────────────────────────────────────────────────
 //  ensureNamespace
 // ─────────────────────────────────────────────────────────────
 bool K8sController::ensureNamespace(const std::string& ns)
@@ -164,13 +272,13 @@ bool K8sController::ensureNamespace(const std::string& ns)
 
     std::string body = R"({"apiVersion":"v1","kind":"Namespace","metadata":{"name":")" + ns + R"("}})";
     std::string resp = curlPost(api_server_ + "/api/v1/namespaces", body);
-    bool ok = (resp.find("\"name\":\"" + ns + "\"") != std::string::npos);
+    bool ok = checkApiResponse(resp, "ensureNamespace(" + ns + ")");
     std::cout << "[K8sController] Namespace " << ns << (ok ? " created" : " failed") << "\n";
     return ok;
 }
 
 // ─────────────────────────────────────────────────────────────
-//  DB image / port / env-var mapping
+//  DB image / port / env-var / mount-path mapping
 // ─────────────────────────────────────────────────────────────
 std::string K8sController::dbImage(const std::string& db_type)
 {
@@ -198,17 +306,96 @@ std::string K8sController::dbEnvVar(const std::string& alias)
     return r + "_URL";
 }
 
+std::string K8sController::dbMountPath(const std::string& db_type)
+{
+    if (db_type == "postgres") return "/var/lib/postgresql/data";
+    if (db_type == "mysql")    return "/var/lib/mysql";
+    if (db_type == "mongo")    return "/data/db";
+    if (db_type == "redis")    return "/data";
+    return "/var/lib/postgresql/data";
+}
+
 // ─────────────────────────────────────────────────────────────
-//  buildDbDeploymentJson — minimal Deployment JSON for a DB pod
+//  buildPersistentVolumeClaimJson — PVC via K3s local-path
+// ─────────────────────────────────────────────────────────────
+std::string K8sController::buildPersistentVolumeClaimJson(const std::string& ns,
+                                                           const std::string& name,
+                                                           int size_gb)
+{
+    return R"({
+    "apiVersion": "v1",
+    "kind": "PersistentVolumeClaim",
+    "metadata": {"name": ")" + name + R"(", "namespace": ")" + ns + R"("},
+    "spec": {
+        "accessModes": ["ReadWriteOnce"],
+        "storageClassName": "local-path",
+        "resources": {
+            "requests": {
+                "storage": ")" + std::to_string(size_gb) + R"(Gi"
+            }
+        }
+    }
+})";
+}
+
+// ─────────────────────────────────────────────────────────────
+//  buildIngressJson — Traefik host-based routing
+//  Generates a networking.k8s.io/v1 Ingress resource that maps
+//  an external HTTP domain to an internal ClusterIP Service.
+// ─────────────────────────────────────────────────────────────
+std::string K8sController::buildIngressJson(const std::string& ns,
+                                             const std::string& name,
+                                             const std::string& domain,
+                                             const std::string& backend_service_name,
+                                             int backend_port)
+{
+    return R"({
+    "apiVersion": "networking.k8s.io/v1",
+    "kind": "Ingress",
+    "metadata": {
+        "name": ")" + name + R"(",
+        "namespace": ")" + ns + R"(",
+        "annotations": {
+            "kubernetes.io/ingress.class": "traefik"
+        }
+    },
+    "spec": {
+        "rules": [{
+            "host": ")" + domain + R"(",
+            "http": {
+                "paths": [{
+                    "path": "/",
+                    "pathType": "Prefix",
+                    "backend": {
+                        "service": {
+                            "name": ")" + backend_service_name + R"(",
+                            "port": {
+                                "number": )" + std::to_string(backend_port) + R"(
+                            }
+                        }
+                    }
+                }]
+            }
+        }]
+    }
+})";
+}
+
+// ─────────────────────────────────────────────────────────────
+//  buildDbDeploymentJson — Deployment with PVC + resource limits
 // ─────────────────────────────────────────────────────────────
 std::string K8sController::buildDbDeploymentJson(const std::string& ns,
                                                    const std::string& name,
                                                    const DbEntry& db,
                                                    const std::string& db_user,
-                                                   const std::string& db_password)
+                                                   const std::string& db_password,
+                                                   const std::string& pvc_name,
+                                                   const std::string& max_cpu,
+                                                   const std::string& max_memory)
 {
     int port = dbPort(db.type);
     std::string image = dbImage(db.type);
+    std::string mount_path = dbMountPath(db.type);
 
     // Build env vars depending on DB type
     std::string env_json;
@@ -248,6 +435,7 @@ std::string K8sController::buildDbDeploymentJson(const std::string& ns,
     "metadata": {"name": ")" + name + R"(", "namespace": ")" + ns + R"("},
     "spec": {
         "replicas": 1,
+        "strategy": {"type": "Recreate"},
         "selector": {"matchLabels": {"app": ")" + name + R"("}},
         "template": {
             "metadata": {"labels": {"app": ")" + name + R"("}},
@@ -256,7 +444,27 @@ std::string K8sController::buildDbDeploymentJson(const std::string& ns,
                     "name": "db",
                     "image": ")" + image + R"(",
                     "ports": [{"containerPort": )" + std::to_string(port) + R"(}],
-                    "env": )" + env_json + R"(
+                    "env": )" + env_json + R"(,
+                    "resources": {
+                        "requests": {
+                            "cpu": ")" + max_cpu + R"(",
+                            "memory": ")" + max_memory + R"("
+                        },
+                        "limits": {
+                            "cpu": ")" + max_cpu + R"(",
+                            "memory": ")" + max_memory + R"("
+                        }
+                    },
+                    "volumeMounts": [{
+                        "name": "db-data",
+                        "mountPath": ")" + mount_path + R"("
+                    }]
+                }],
+                "volumes": [{
+                    "name": "db-data",
+                    "persistentVolumeClaim": {
+                        "claimName": ")" + pvc_name + R"("
+                    }
                 }]
             }
         }
@@ -336,7 +544,14 @@ std::string K8sController::waitForPodRunning(const std::string& ns,
 }
 
 // ─────────────────────────────────────────────────────────────
-//  spinUpDbContainer
+//  spinUpDbContainer — production pipeline:
+//  1. Lookup resource tier for the domain
+//  2. Create namespace
+//  3. Deploy PVC (validate)
+//  4. Deploy DB Deployment with PVC + resource limits (validate)
+//  5. Deploy Service (validate)
+//  6. Wait for pod Running
+//  7. Build connection string
 // ─────────────────────────────────────────────────────────────
 std::string K8sController::spinUpDbContainer(const std::string& domain,
                                               const DbEntry& db,
@@ -349,28 +564,69 @@ std::string K8sController::spinUpDbContainer(const std::string& domain,
     std::string safe_domain = domain;
     for (auto& c : safe_domain) if (c == '.') c = '-';
 
-    std::string ns   = "site-" + safe_domain;
-    std::string name = "db-" + safe_domain + "-" + db.alias;
+    std::string ns       = "site-" + safe_domain;
+    std::string name     = "db-" + safe_domain + "-" + db.alias;
+    std::string pvc_name = "pvc-" + name;
     int port = dbPort(db.type);
 
-    ensureNamespace(ns);
+    // 1. Lookup resource tier
+    ResourceTier tier = lookupResourceTier(domain);
 
-    // Create Deployment
-    std::string dep_json = buildDbDeploymentJson(ns, name, db, db_user, db_password);
+    // 2. Create namespace
+    if (!ensureNamespace(ns))
+    {
+        record_out.status    = "error";
+        record_out.error_msg = "Failed to create namespace " + ns;
+        std::cerr << "[K8sController] " << record_out.error_msg << "\n";
+        return "";
+    }
+
+    // 3. Deploy PVC
+    std::string pvc_json = buildPersistentVolumeClaimJson(ns, pvc_name, tier.db_storage_gb);
+    std::string pvc_url  = api_server_ + "/api/v1/namespaces/" + ns + "/persistentvolumeclaims";
+    std::string pvc_resp = curlPost(pvc_url, pvc_json);
+    if (!checkApiResponse(pvc_resp, "PVC " + pvc_name))
+    {
+        record_out.status    = "error";
+        record_out.error_msg = "Failed to create PVC " + pvc_name;
+        std::cerr << "[K8sController] " << record_out.error_msg << "\n";
+        return "";
+    }
+    std::cout << "[K8sController] PVC " << pvc_name << " created ("
+              << tier.db_storage_gb << "Gi)\n";
+
+    // 4. Create Deployment with PVC mount + resource limits
+    std::string dep_json = buildDbDeploymentJson(ns, name, db, db_user, db_password,
+                                                  pvc_name, tier.db_max_cpu, tier.db_max_memory);
     std::string dep_url  = api_server_ + "/apis/apps/v1/namespaces/" + ns + "/deployments";
     std::string dep_resp = curlPost(dep_url, dep_json);
-    std::cout << "[K8sController] Created DB deployment " << name << "\n";
+    if (!checkApiResponse(dep_resp, "DB Deployment " + name))
+    {
+        record_out.status    = "error";
+        record_out.error_msg = "Failed to create DB deployment " + name;
+        std::cerr << "[K8sController] " << record_out.error_msg << "\n";
+        return "";
+    }
+    std::cout << "[K8sController] Created DB deployment " << name
+              << " [cpu=" << tier.db_max_cpu << " mem=" << tier.db_max_memory << "]\n";
 
-    // Create Service
+    // 5. Create Service
     std::string svc_json = buildServiceJson(ns, name, port, name);
     std::string svc_url  = api_server_ + "/api/v1/namespaces/" + ns + "/services";
     std::string svc_resp = curlPost(svc_url, svc_json);
+    if (!checkApiResponse(svc_resp, "DB Service " + name))
+    {
+        record_out.status    = "error";
+        record_out.error_msg = "Failed to create DB service " + name;
+        std::cerr << "[K8sController] " << record_out.error_msg << "\n";
+        return "";
+    }
 
     // Get ClusterIP
     std::string svc_get  = curlGet(api_server_ + "/api/v1/namespaces/" + ns + "/services/" + name);
     std::string cluster_ip = parseClusterIp(svc_get);
 
-    // Wait for pod Running
+    // 6. Wait for pod Running
     std::string pod_name = waitForPodRunning(ns, name, timeout_secs);
 
     record_out.k8s_namespace  = ns;
@@ -387,7 +643,7 @@ std::string K8sController::spinUpDbContainer(const std::string& domain,
         return "";
     }
 
-    // Build connection string
+    // 7. Build connection string
     std::string conn_str;
     if (db.type == "postgres")
         conn_str = "postgresql://" + db_user + ":" + db_password + "@" +
@@ -408,12 +664,15 @@ std::string K8sController::spinUpDbContainer(const std::string& domain,
 }
 
 // ─────────────────────────────────────────────────────────────
-//  buildBeDeploymentJson
+//  buildBeDeploymentJson — BE Deployment with resource limits
+//  Keeps hostPath for source code mounting.
 // ─────────────────────────────────────────────────────────────
 std::string K8sController::buildBeDeploymentJson(const SiteEntry& site,
                                                   const std::string& ns,
                                                   const std::string& name,
-                                                  const std::map<std::string, std::string>& env)
+                                                  const std::map<std::string, std::string>& env,
+                                                  const std::string& max_cpu,
+                                                  const std::string& max_memory)
 {
     // Choose base image based on be_type
     std::string image;
@@ -459,6 +718,16 @@ std::string K8sController::buildBeDeploymentJson(const SiteEntry& site,
                     "workingDir": "/app",
                     "ports": [{"containerPort": )" + std::to_string(site.be_port) + R"(}],
                     "env": )" + env_arr + R"(,
+                    "resources": {
+                        "requests": {
+                            "cpu": ")" + max_cpu + R"(",
+                            "memory": ")" + max_memory + R"("
+                        },
+                        "limits": {
+                            "cpu": ")" + max_cpu + R"(",
+                            "memory": ")" + max_memory + R"("
+                        }
+                    },
                     "volumeMounts": [{
                         "name": "be-src",
                         "mountPath": "/app"
@@ -475,7 +744,13 @@ std::string K8sController::buildBeDeploymentJson(const SiteEntry& site,
 }
 
 // ─────────────────────────────────────────────────────────────
-//  spinUpBeContainer
+//  spinUpBeContainer — production pipeline:
+//  1. Lookup resource tier for the domain
+//  2. Create namespace
+//  3. Deploy BE Deployment with resource limits (validate)
+//  4. Deploy Service (validate)
+//  5. Deploy Ingress for public gateway (validate)
+//  6. Wait for pod Running
 // ─────────────────────────────────────────────────────────────
 std::string K8sController::spinUpBeContainer(const SiteEntry& site,
                                               const std::map<std::string, std::string>& conn_env,
@@ -488,27 +763,71 @@ std::string K8sController::spinUpBeContainer(const SiteEntry& site,
     std::string ns   = "site-" + safe_domain;
     std::string name = "be-" + safe_domain;
 
-    ensureNamespace(ns);
+    // 1. Lookup resource tier
+    ResourceTier tier = lookupResourceTier(site.domain);
 
-    // Combine conn_env with working directory env var
+    // 2. Create namespace
+    if (!ensureNamespace(ns))
+    {
+        record_out.status    = "error";
+        record_out.error_log = "Failed to create namespace " + ns;
+        std::cerr << "[K8sController] " << record_out.error_log << "\n";
+        return "";
+    }
+
+    // 3. Combine conn_env with working directory env var and deploy
     auto env = conn_env;
     env["APP_DIR"] = "/app";
 
-    std::string dep_json = buildBeDeploymentJson(site, ns, name, env);
+    std::string dep_json = buildBeDeploymentJson(site, ns, name, env,
+                                                  tier.be_max_cpu, tier.be_max_memory);
     std::string dep_url  = api_server_ + "/apis/apps/v1/namespaces/" + ns + "/deployments";
-    curlPost(dep_url, dep_json);
-    std::cout << "[K8sController] Created BE deployment " << name << "\n";
+    std::string dep_resp = curlPost(dep_url, dep_json);
+    if (!checkApiResponse(dep_resp, "BE Deployment " + name))
+    {
+        record_out.status    = "error";
+        record_out.error_log = "Failed to create BE deployment " + name;
+        std::cerr << "[K8sController] " << record_out.error_log << "\n";
+        return "";
+    }
+    std::cout << "[K8sController] Created BE deployment " << name
+              << " [cpu=" << tier.be_max_cpu << " mem=" << tier.be_max_memory << "]\n";
 
-    // Create Service
+    // 4. Create Service
     std::string svc_json = buildServiceJson(ns, name, site.be_port, name);
     std::string svc_url  = api_server_ + "/api/v1/namespaces/" + ns + "/services";
     std::string svc_resp = curlPost(svc_url, svc_json);
+    if (!checkApiResponse(svc_resp, "BE Service " + name))
+    {
+        record_out.status    = "error";
+        record_out.error_log = "Failed to create BE service " + name;
+        std::cerr << "[K8sController] " << record_out.error_log << "\n";
+        return "";
+    }
 
     // Get ClusterIP
     std::string svc_get    = curlGet(api_server_ + "/api/v1/namespaces/" + ns + "/services/" + name);
     std::string cluster_ip = parseClusterIp(svc_get);
 
-    // Wait for pod Running
+    // 5. Create Ingress for public gateway
+    std::string ingress_name = "ingress-" + safe_domain;
+    std::string ing_json = buildIngressJson(ns, ingress_name, site.domain, name,
+                                             static_cast<int>(site.be_port));
+    std::string ing_url  = api_server_ + "/apis/networking.k8s.io/v1/namespaces/" + ns + "/ingresses";
+    std::string ing_resp = curlPost(ing_url, ing_json);
+    if (!checkApiResponse(ing_resp, "Ingress " + ingress_name))
+    {
+        // Ingress failure is non-fatal — the service still works within the cluster
+        std::cerr << "[K8sController] WARNING: Ingress creation failed for " << site.domain
+                  << " (service still accessible internally)\n";
+    }
+    else
+    {
+        std::cout << "[K8sController] Ingress " << ingress_name
+                  << " created for " << site.domain << "\n";
+    }
+
+    // 6. Wait for pod Running
     std::string pod_name = waitForPodRunning(ns, name, timeout_secs);
 
     record_out.k8s_namespace  = ns;

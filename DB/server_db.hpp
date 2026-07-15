@@ -22,6 +22,12 @@ struct DomainRecord
     int         db_count    = 0;
     std::string status;     // pending | building | running | error
     std::string error_msg;
+    // Resource tier (PaaS upgrade)
+    std::string db_max_cpu    = "250m";
+    std::string db_max_memory = "256Mi";
+    int         db_storage_gb = 5;
+    std::string be_max_cpu    = "500m";
+    std::string be_max_memory = "512Mi";
 };
 
 struct PageRecord

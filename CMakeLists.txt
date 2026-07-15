@@ -89,3 +89,29 @@ target_link_libraries(HTTP_Server
     ${CURL_LIBRARIES}
     Threads::Threads
 )
+
+# ── Test executable ──────────────────────────────────────────
+add_executable(test_k8s_controller
+    K8s/test_k8s_controller.cpp
+    K8s/k8s_controller.cpp
+    Configuration/site_config.cpp
+    Configuration/config_parser.cpp
+    DB/server_db.cpp
+)
+
+target_include_directories(test_k8s_controller PRIVATE
+    Configuration
+    DB
+    K8s
+    ${JSONCPP_INCLUDE_DIRS}
+    ${PQXX_INCLUDE_DIRS}
+    ${CURL_INCLUDE_DIRS}
+)
+
+target_link_libraries(test_k8s_controller
+    ${JSONCPP_LIBRARIES}
+    ${PQXX_LIBRARIES}
+    ${CURL_LIBRARIES}
+    Threads::Threads
+)
+

@@ -8,10 +8,24 @@
 #include "../DB/server_db.hpp"
 
 // ─────────────────────────────────────────────────────────────
+//  ResourceTier — per-tenant compute/storage specifications
+//  Fetched from the master database or sites.conf.
+// ─────────────────────────────────────────────────────────────
+struct ResourceTier
+{
+    std::string db_max_cpu    = "250m";
+    std::string db_max_memory = "256Mi";
+    int         db_storage_gb = 5;
+    std::string be_max_cpu    = "500m";
+    std::string be_max_memory = "512Mi";
+};
+
+// ─────────────────────────────────────────────────────────────
 //  K8sController
 //  Talks to the Kubernetes API server via libcurl + kubeadm
-//  REST API (application/json). Manages namespaces, Deployments
-//  and Services for BE and DB containers.
+//  REST API (application/json). Manages namespaces, Deployments,
+//  Services, PersistentVolumeClaims, and Ingresses for BE and
+//  DB containers in a Render-like PaaS architecture.
 // ─────────────────────────────────────────────────────────────
 class K8sController
 {
@@ -52,6 +66,10 @@ public:
                            const std::string& pod_name,
                            int tail_lines = 50);
 
+    // ── Resource tier lookup ─────────────────────────────────
+    // Query the master database and sites.conf for custom specs.
+    ResourceTier lookupResourceTier(const std::string& domain);
+
 private:
     std::string api_server_;
     std::string kubeconfig_;
@@ -64,21 +82,48 @@ private:
     std::string curlDelete(const std::string& url);
 
     // ── Kubernetes manifest builders ─────────────────────────
+
+    // PVC — requests storage via K3s local-path provisioner
+    std::string buildPersistentVolumeClaimJson(const std::string& ns,
+                                                const std::string& name,
+                                                int size_gb);
+
+    // Ingress — Traefik host-based routing (networking.k8s.io/v1)
+    std::string buildIngressJson(const std::string& ns,
+                                  const std::string& name,
+                                  const std::string& domain,
+                                  const std::string& backend_service_name,
+                                  int backend_port);
+
+    // DB Deployment with PVC mount + resource limits
     std::string buildDbDeploymentJson(const std::string& ns,
                                       const std::string& name,
                                       const DbEntry& db,
                                       const std::string& db_user,
-                                      const std::string& db_password);
+                                      const std::string& db_password,
+                                      const std::string& pvc_name,
+                                      const std::string& max_cpu,
+                                      const std::string& max_memory);
 
+    // ClusterIP Service
     std::string buildServiceJson(const std::string& ns,
                                  const std::string& name,
                                  int port,
                                  const std::string& selector_app);
 
+    // BE Deployment with resource limits (keeps hostPath for source)
     std::string buildBeDeploymentJson(const SiteEntry& site,
                                       const std::string& ns,
                                       const std::string& name,
-                                      const std::map<std::string, std::string>& env);
+                                      const std::map<std::string, std::string>& env,
+                                      const std::string& max_cpu,
+                                      const std::string& max_memory);
+
+    // ── API response validation ──────────────────────────────
+    // Returns true if the K8s API response indicates success (200/201).
+    // Logs detailed error messages with context on failure.
+    bool checkApiResponse(const std::string& response,
+                          const std::string& context);
 
     // ── Polling helpers ──────────────────────────────────────
     // Wait until the first pod in a Deployment is Running.
@@ -99,6 +144,11 @@ private:
     static int dbPort(const std::string& db_type);
     // DB type → env-var name for connection string
     static std::string dbEnvVar(const std::string& alias);
+    // DB type → data directory mount path inside container
+    static std::string dbMountPath(const std::string& db_type);
+
+    // Allow test harness access to private builders
+    friend class K8sControllerTestable;
 };
 
 extern K8sController k8s_controller;

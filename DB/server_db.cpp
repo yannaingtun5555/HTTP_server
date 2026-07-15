@@ -85,11 +85,14 @@ int ServerDB::insertDomain(const DomainRecord& d)
         pqxx::work txn(*conn_);
         auto r = txn.exec_params1(
             "INSERT INTO domains(domain,user_owner,fe_folder,be_folder,"
-            "be_type,run_cmd,be_port,fe_build,db_count,status)"
-            " VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id",
+            "be_type,run_cmd,be_port,fe_build,db_count,status,"
+            "db_max_cpu,db_max_memory,db_storage_gb,be_max_cpu,be_max_memory)"
+            " VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING id",
             d.domain, d.user_owner, d.fe_folder, d.be_folder,
             d.be_type, d.run_cmd, d.be_port, d.fe_build,
-            d.db_count, d.status.empty() ? "pending" : d.status);
+            d.db_count, d.status.empty() ? "pending" : d.status,
+            d.db_max_cpu, d.db_max_memory, d.db_storage_gb,
+            d.be_max_cpu, d.be_max_memory);
         txn.commit();
         return r[0].as<int>();
     }
@@ -108,8 +111,9 @@ bool ServerDB::upsertDomain(const DomainRecord& d)
         pqxx::work txn(*conn_);
         txn.exec_params(
             "INSERT INTO domains(domain,user_owner,fe_folder,be_folder,"
-            "be_type,run_cmd,be_port,fe_build,db_count,status,error_msg)"
-            " VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)"
+            "be_type,run_cmd,be_port,fe_build,db_count,status,error_msg,"
+            "db_max_cpu,db_max_memory,db_storage_gb,be_max_cpu,be_max_memory)"
+            " VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)"
             " ON CONFLICT (domain) DO UPDATE SET"
             " user_owner=EXCLUDED.user_owner,"
             " fe_folder=EXCLUDED.fe_folder,"
@@ -120,10 +124,17 @@ bool ServerDB::upsertDomain(const DomainRecord& d)
             " fe_build=EXCLUDED.fe_build,"
             " db_count=EXCLUDED.db_count,"
             " status=EXCLUDED.status,"
-            " error_msg=EXCLUDED.error_msg",
+            " error_msg=EXCLUDED.error_msg,"
+            " db_max_cpu=EXCLUDED.db_max_cpu,"
+            " db_max_memory=EXCLUDED.db_max_memory,"
+            " db_storage_gb=EXCLUDED.db_storage_gb,"
+            " be_max_cpu=EXCLUDED.be_max_cpu,"
+            " be_max_memory=EXCLUDED.be_max_memory",
             d.domain, d.user_owner, d.fe_folder, d.be_folder, d.be_type,
             d.run_cmd, d.be_port, d.fe_build, d.db_count,
-            d.status.empty() ? "pending" : d.status, d.error_msg);
+            d.status.empty() ? "pending" : d.status, d.error_msg,
+            d.db_max_cpu, d.db_max_memory, d.db_storage_gb,
+            d.be_max_cpu, d.be_max_memory);
         txn.commit();
         return true;
     }
@@ -162,7 +173,8 @@ bool ServerDB::getDomain(const std::string& domain, DomainRecord& out)
         pqxx::work txn(*conn_);
         auto r = txn.exec_params(
             "SELECT id,domain,user_owner,fe_folder,be_folder,be_type,"
-            "run_cmd,be_port,fe_build,db_count,status,error_msg"
+            "run_cmd,be_port,fe_build,db_count,status,error_msg,"
+            "db_max_cpu,db_max_memory,db_storage_gb,be_max_cpu,be_max_memory"
             " FROM domains WHERE domain=$1", domain);
         txn.commit();
         if (r.empty()) return false;
@@ -179,6 +191,11 @@ bool ServerDB::getDomain(const std::string& domain, DomainRecord& out)
         out.db_count   = row[9].is_null() ? 0  : row[9].as<int>();
         out.status     = row[10].is_null()? "" : row[10].as<std::string>();
         out.error_msg  = row[11].is_null()? "" : row[11].as<std::string>();
+        out.db_max_cpu    = row[12].is_null() ? "250m"  : row[12].as<std::string>();
+        out.db_max_memory = row[13].is_null() ? "256Mi" : row[13].as<std::string>();
+        out.db_storage_gb = row[14].is_null() ? 5       : row[14].as<int>();
+        out.be_max_cpu    = row[15].is_null() ? "500m"  : row[15].as<std::string>();
+        out.be_max_memory = row[16].is_null() ? "512Mi" : row[16].as<std::string>();
         return true;
     }
     catch (const std::exception& e)
@@ -197,7 +214,8 @@ std::vector<DomainRecord> ServerDB::allDomains()
         pqxx::work txn(*conn_);
         auto rows = txn.exec(
             "SELECT id,domain,user_owner,fe_folder,be_folder,be_type,"
-            "run_cmd,be_port,fe_build,db_count,status,error_msg"
+            "run_cmd,be_port,fe_build,db_count,status,error_msg,"
+            "db_max_cpu,db_max_memory,db_storage_gb,be_max_cpu,be_max_memory"
             " FROM domains ORDER BY id");
         txn.commit();
         for (const auto& row : rows)
@@ -215,6 +233,11 @@ std::vector<DomainRecord> ServerDB::allDomains()
             d.db_count   = row[9].is_null() ? 0  : row[9].as<int>();
             d.status     = row[10].is_null()? "" : row[10].as<std::string>();
             d.error_msg  = row[11].is_null()? "" : row[11].as<std::string>();
+            d.db_max_cpu    = row[12].is_null() ? "250m"  : row[12].as<std::string>();
+            d.db_max_memory = row[13].is_null() ? "256Mi" : row[13].as<std::string>();
+            d.db_storage_gb = row[14].is_null() ? 5       : row[14].as<int>();
+            d.be_max_cpu    = row[15].is_null() ? "500m"  : row[15].as<std::string>();
+            d.be_max_memory = row[16].is_null() ? "512Mi" : row[16].as<std::string>();
             result.push_back(d);
         }
     }

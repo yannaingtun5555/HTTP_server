@@ -89,6 +89,11 @@ void SiteConfig::load(const std::string& file_path)
         if (fields.count("db_count"))  s.db_count  = std::stoul(fields["db_count"]);
         if (fields.count("be_cluster_host")) s.be_cluster_host = fields["be_cluster_host"];
         if (fields.count("be_cluster_port"))  s.be_cluster_port = std::stoul(fields["be_cluster_port"]);
+        if (fields.count("db_max_cpu"))    s.db_max_cpu    = fields["db_max_cpu"];
+        if (fields.count("db_max_memory")) s.db_max_memory = fields["db_max_memory"];
+        if (fields.count("db_storage_gb")) s.db_storage_gb = std::stoi(fields["db_storage_gb"]);
+        if (fields.count("be_max_cpu"))    s.be_max_cpu    = fields["be_max_cpu"];
+        if (fields.count("be_max_memory")) s.be_max_memory = fields["be_max_memory"];
 
         // Attach DB entries
         if (raw_dbs.count(domain))
@@ -176,6 +181,11 @@ void SiteConfig::writeSite(const std::string& file_path, const SiteEntry& site)
             f << "site." << s.domain << ".be_cluster_host=" << s.be_cluster_host << "\n";
         if (s.be_cluster_port != 0)
             f << "site." << s.domain << ".be_cluster_port=" << s.be_cluster_port << "\n";
+        f << "site." << s.domain << ".db_max_cpu="    << s.db_max_cpu    << "\n";
+        f << "site." << s.domain << ".db_max_memory=" << s.db_max_memory << "\n";
+        f << "site." << s.domain << ".db_storage_gb=" << s.db_storage_gb << "\n";
+        f << "site." << s.domain << ".be_max_cpu="    << s.be_max_cpu    << "\n";
+        f << "site." << s.domain << ".be_max_memory=" << s.be_max_memory << "\n";
 
         for (std::size_t i = 0; i < s.dbs.size(); ++i)
         {

@@ -32,6 +32,13 @@ struct SiteEntry
     unsigned int db_count = 0;
     std::vector<DbEntry> dbs;
 
+    // Resource tier (PaaS upgrade)
+    std::string db_max_cpu    = "250m";
+    std::string db_max_memory = "256Mi";
+    int         db_storage_gb = 5;
+    std::string be_max_cpu    = "500m";
+    std::string be_max_memory = "512Mi";
+
     // Runtime-populated after K8s deployment
     std::string be_cluster_host;
     unsigned int be_cluster_port = 0;

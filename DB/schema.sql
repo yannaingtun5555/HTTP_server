@@ -104,3 +104,10 @@ DO $$ BEGIN
         BEFORE UPDATE ON be_containers
         FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
+-- ── Resource tier columns (added for PaaS upgrade) ────────────
+ALTER TABLE domains ADD COLUMN IF NOT EXISTS db_max_cpu    TEXT DEFAULT '250m';
+ALTER TABLE domains ADD COLUMN IF NOT EXISTS db_max_memory TEXT DEFAULT '256Mi';
+ALTER TABLE domains ADD COLUMN IF NOT EXISTS db_storage_gb INT  DEFAULT 5;
+ALTER TABLE domains ADD COLUMN IF NOT EXISTS be_max_cpu    TEXT DEFAULT '500m';
+ALTER TABLE domains ADD COLUMN IF NOT EXISTS be_max_memory TEXT DEFAULT '512Mi';
