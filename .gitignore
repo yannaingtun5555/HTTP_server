@@ -15,3 +15,5 @@ HTTP_Server.mode
 *.swp
 *~
 .DS_Store
+sites/
+var/www/

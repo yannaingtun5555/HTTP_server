@@ -1,0 +1,65 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: admin-panel
+  namespace: server-system
+  labels:
+    app: admin-panel
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: admin-panel
+  template:
+    metadata:
+      labels:
+        app: admin-panel
+    spec:
+      containers:
+        - name: admin-panel
+          image: admin-panel:latest
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 8080
+          env:
+            - name: DATABASE_URL
+              value: "postgresql://admin:changeme@pg-server.server-system.svc.cluster.local:5432/server_db"
+            - name: DJANGO_SECRET_KEY
+              value: "change-this-in-production-use-a-real-secret"
+            - name: DEBUG
+              value: "False"
+            - name: INTERNAL_API_URL
+              value: "http://127.0.0.1:80/_api/internal"
+            - name: INTERNAL_API_SECRET
+              value: "changeme-secret"
+          readinessProbe:
+            httpGet:
+              path: /_admin/
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /_admin/
+              port: 8080
+            initialDelaySeconds: 20
+            periodSeconds: 15
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: admin-panel
+  namespace: server-system
+  labels:
+    app: admin-panel
+spec:
+  type: ClusterIP
+  selector:
+    app: admin-panel
+  ports:
+    - name: http
+      protocol: TCP
+      port: 8080
+      targetPort: 8080

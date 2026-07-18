@@ -18,12 +18,12 @@ struct BackendConfig
 class Config
 {
     public:
-        string host;
-        unsigned int port;
-        int connection_limit;
+        string host = "0.0.0.0";
+        unsigned int port = 8000;
+        int connection_limit = 0;
         int thread_pool_size = 0; // 0 = auto-detect
-        string root_dir;
-        bool show;
+        string root_dir = "./var";
+        bool show = false;
 
         // Reverse proxy settings
         int backend_connect_timeout  = 30;  // seconds

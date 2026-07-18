@@ -1,0 +1,111 @@
+# =============================================================================
+# Database Deployment Template
+# Replace all PLACEHOLDER_* values with actual values before applying.
+# One copy of this file per database container (db_alias).
+# =============================================================================
+
+---
+# Namespace should already exist (created by be-deployment.yaml).
+# If applying this file independently, create it first:
+# apiVersion: v1
+# kind: Namespace
+# metadata:
+#   name: site-DOMAIN
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: pvc-db-DOMAIN-ALIAS       # PLACEHOLDER: e.g. pvc-db-example-com-main
+  namespace: site-DOMAIN          # PLACEHOLDER: e.g. site-example-com
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: standard
+  resources:
+    requests:
+      storage: 5Gi                # adjust as needed
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: db-DOMAIN-ALIAS           # PLACEHOLDER: e.g. db-example-com-main
+  namespace: site-DOMAIN          # PLACEHOLDER
+  labels:
+    app: db-DOMAIN-ALIAS          # PLACEHOLDER
+    site: DOMAIN                  # PLACEHOLDER: domain slug
+    db-alias: ALIAS               # PLACEHOLDER: logical alias
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: db-DOMAIN-ALIAS        # PLACEHOLDER
+  strategy:
+    type: Recreate                # needed for single-instance DBs with PVC
+  template:
+    metadata:
+      labels:
+        app: db-DOMAIN-ALIAS      # PLACEHOLDER
+    spec:
+      containers:
+        - name: database
+          image: PLACEHOLDER_DB_IMAGE   # e.g. postgres:15-alpine, mysql:8, mongo:6, redis:7-alpine
+          ports:
+            - containerPort: PLACEHOLDER_DB_PORT  # e.g. 5432, 3306, 27017, 6379
+          env:
+            # PLACEHOLDER_DB_ENV: add the appropriate env vars for your DB image.
+            # PostgreSQL example:
+            # - name: POSTGRES_DB
+            #   value: "PLACEHOLDER_DB_NAME"
+            # - name: POSTGRES_USER
+            #   value: "PLACEHOLDER_DB_USER"
+            # - name: POSTGRES_PASSWORD
+            #   value: "PLACEHOLDER_DB_PASSWORD"
+            #
+            # MySQL example:
+            # - name: MYSQL_DATABASE
+            #   value: "PLACEHOLDER_DB_NAME"
+            # - name: MYSQL_USER
+            #   value: "PLACEHOLDER_DB_USER"
+            # - name: MYSQL_PASSWORD
+            #   value: "PLACEHOLDER_DB_PASSWORD"
+            # - name: MYSQL_ROOT_PASSWORD
+            #   value: "PLACEHOLDER_ROOT_PASSWORD"
+            #
+            # MongoDB example:
+            # - name: MONGO_INITDB_DATABASE
+            #   value: "PLACEHOLDER_DB_NAME"
+            # - name: MONGO_INITDB_ROOT_USERNAME
+            #   value: "PLACEHOLDER_DB_USER"
+            # - name: MONGO_INITDB_ROOT_PASSWORD
+            #   value: "PLACEHOLDER_DB_PASSWORD"
+            #
+            # Redis: typically no auth env needed unless using requirepass
+            - name: PLACEHOLDER_ENV_KEY
+              value: "PLACEHOLDER_ENV_VALUE"
+          volumeMounts:
+            - name: db-data
+              mountPath: PLACEHOLDER_DATA_MOUNT   # e.g. /var/lib/postgresql/data, /var/lib/mysql, /data/db, /data
+      volumes:
+        - name: db-data
+          persistentVolumeClaim:
+            claimName: pvc-db-DOMAIN-ALIAS       # PLACEHOLDER: match PVC name above
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: db-DOMAIN-ALIAS           # PLACEHOLDER: e.g. db-example-com-main
+  namespace: site-DOMAIN          # PLACEHOLDER
+  labels:
+    app: db-DOMAIN-ALIAS          # PLACEHOLDER
+spec:
+  type: ClusterIP
+  selector:
+    app: db-DOMAIN-ALIAS          # PLACEHOLDER
+  ports:
+    - name: db
+      protocol: TCP
+      port: PLACEHOLDER_DB_PORT       # PLACEHOLDER: e.g. 5432, 3306, 27017, 6379
+      targetPort: PLACEHOLDER_DB_PORT # PLACEHOLDER: same as containerPort

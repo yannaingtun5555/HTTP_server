@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Add Site — Database {{ db_number }} of {{ db_count }} — Server Admin Panel{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1>Add New Site</h1>
+</div>
+
+<div class="steps">
+  <span>Step 1: Site Info</span>
+  <span class="step-sep">›</span>
+  <span class="step-active">Step 2: Database {{ db_number }} of {{ db_count }}</span>
+  <span class="step-sep">›</span>
+  <span>Deploy</span>
+</div>
+
+<div class="card" style="max-width:640px;">
+  <div class="card-title">Database {{ db_number }} Credentials</div>
+  <p class="text-muted mb-1">
+    Enter connection credentials for database <strong>{{ db_number }}</strong> of <strong>{{ db_count }}</strong>.
+  </p>
+  <form method="post" id="step2-form">
+    {% csrf_token %}
+    {% for field in form %}
+    <div class="form-group">
+      <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+      {{ field }}
+      {% if field.errors %}
+        <ul class="errorlist">
+          {% for error in field.errors %}<li>{{ error }}</li>{% endfor %}
+        </ul>
+      {% endif %}
+    </div>
+    {% endfor %}
+    <div class="mt-2" style="display:flex;gap:.75rem;align-items:center;">
+      <button type="submit" class="btn btn-primary">
+        {% if db_number == db_count %}Finish &amp; Deploy →{% else %}Next Database →{% endif %}
+      </button>
+      <a href="/_admin/" class="btn btn-secondary">Cancel</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — Server Admin Panel{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1>Sites Dashboard</h1>
+  <a href="/_admin/add/" class="btn btn-primary">+ Add Site</a>
+</div>
+
+{% if db_error %}
+<div class="alert alert-error">
+  {{ db_error }}
+</div>
+{% endif %}
+
+{% if domains %}
+<div class="card" style="padding: 0; overflow: hidden;">
+  <table>
+    <thead>
+      <tr>
+        <th>Domain</th>
+        <th>Owner</th>
+        <th>Backend</th>
+        <th>Databases</th>
+        <th>Status</th>
+        <th>Created</th>
+        <th>Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for site in domains %}
+      <tr>
+        <td>
+          <a href="/_admin/site/{{ site.domain }}/" style="font-weight:600;color:var(--primary);text-decoration:none;">
+            {{ site.domain }}
+          </a>
+        </td>
+        <td>{{ site.user_owner|default:"—" }}</td>
+        <td>
+          <span style="font-size:.82rem;">{{ site.be_type|default:"—" }}</span>
+        </td>
+        <td style="text-align:center;">{{ site.db_count }}</td>
+        <td>
+          {% with s=site.status %}
+          <span class="badge badge-{{ s }}">{{ s }}</span>
+          {% endwith %}
+        </td>
+        <td class="text-muted" style="font-size:.8rem;white-space:nowrap;">
+          {{ site.created_at|date:"Y-m-d H:i" }}
+        </td>
+        <td>
+          <a href="/_admin/site/{{ site.domain }}/" class="btn btn-secondary btn-sm">View</a>
+          <a href="/_admin/site/{{ site.domain }}/delete/" class="btn btn-danger btn-sm" style="margin-left:.3rem;">Delete</a>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="card">
+  <div class="empty-state">
+    <h3>No sites yet</h3>
+    <p class="text-muted mt-1">Get started by adding your first site.</p>
+    <div class="mt-2">
+      <a href="/_admin/add/" class="btn btn-primary">+ Add Site</a>
+    </div>
+  </div>
+</div>
+{% endif %}
+{% endblock %}

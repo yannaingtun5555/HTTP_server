@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Confirm Delete {{ site.domain }} — Server Admin Panel{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1>Delete Site</h1>
+</div>
+
+<div class="card" style="max-width:560px;">
+  <div class="alert alert-error" style="margin-bottom:1rem;">
+    ⚠️ This action is <strong>irreversible</strong>. All containers, databases, and data for this site will be permanently removed.
+  </div>
+
+  <dl class="kv mb-1">
+    <dt>Domain</dt>    <dd><strong>{{ site.domain }}</strong></dd>
+    <dt>Owner</dt>     <dd>{{ site.user_owner|default:"—" }}</dd>
+    <dt>Status</dt>    <dd><span class="badge badge-{{ site.status }}">{{ site.status }}</span></dd>
+    <dt>Databases</dt> <dd>{{ site.db_count }}</dd>
+  </dl>
+
+  <form method="post" id="delete-confirm-form" style="margin-top:1.25rem;">
+    {% csrf_token %}
+    <div style="display:flex;gap:.75rem;align-items:center;">
+      <button type="submit" class="btn btn-danger">
+        🗑 Yes, Delete "{{ site.domain }}"
+      </button>
+      <a href="/_admin/site/{{ site.domain }}/" class="btn btn-secondary">Cancel</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

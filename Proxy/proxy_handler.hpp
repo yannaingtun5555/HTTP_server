@@ -30,6 +30,12 @@ public:
         std::shared_ptr<boost::beast::http::request<boost::beast::http::dynamic_body>> req,
         std::shared_ptr<Session> session
     );
+
+    void forwardRequest(
+        std::shared_ptr<boost::beast::http::request<boost::beast::http::dynamic_body>> req,
+        std::shared_ptr<Session> session,
+        const BackendConfig& backend
+    );
 };
 
 #endif // PROXY_HANDLER_HPP

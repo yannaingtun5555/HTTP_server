@@ -7,8 +7,35 @@
 #include <thread>
 #include <iostream>
 #include <mutex>
+#include <cctype>
 
 ResponseGenerator::ResponseGenerator() {}
+
+static std::string mimeTypeForTarget(const std::string& target)
+{
+    auto path_end = target.find_first_of("?#");
+    std::string path = (path_end == std::string::npos) ? target : target.substr(0, path_end);
+
+    auto dot = path.find_last_of('.');
+    if (dot == std::string::npos)
+        return "text/html";
+
+    std::string ext = path.substr(dot + 1);
+    for (char& c : ext)
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+
+    if (ext == "html" || ext == "htm") return "text/html";
+    if (ext == "css")  return "text/css";
+    if (ext == "js")   return "application/javascript";
+    if (ext == "json") return "application/json";
+    if (ext == "txt")  return "text/plain";
+    if (ext == "png")  return "image/png";
+    if (ext == "jpg" || ext == "jpeg") return "image/jpeg";
+    if (ext == "gif")  return "image/gif";
+    if (ext == "svg")  return "image/svg+xml";
+    if (ext == "ico")  return "image/x-icon";
+    return "application/octet-stream";
+}
 
 void ResponseGenerator::generateAndSendResponse(const boost::beast::http::request<boost::beast::http::dynamic_body>& req,
                                                std::shared_ptr<Session> session, 
@@ -63,37 +90,8 @@ void ResponseGenerator::setResponseHeaders(boost::beast::http::response<boost::b
                                            const boost::beast::http::request<boost::beast::http::dynamic_body>& req) 
 {
     res.set(boost::beast::http::field::server, "HTTP_Server");
-   
-    if (req.find(boost::beast::http::field::content_type) != req.end()) 
-    {
-        std::string content_type = std::string(req[boost::beast::http::field::content_type]);
 
-        if (content_type == "application/json")
-        {
-            res.set(boost::beast::http::field::content_type, "application/json");
-        }
-        else if (content_type == "text/html") 
-        {
-            res.set(boost::beast::http::field::content_type, "text/html");
-        }
-        else if (content_type == "text/plain") 
-        {
-            res.set(boost::beast::http::field::content_type, "text/plain");
-        }
-        else if (content_type == "image/png") 
-        {
-            res.set(boost::beast::http::field::content_type, "image/png");
-        }
-        else 
-        {
-            res.result(boost::beast::http::status::unsupported_media_type);
-            res.set(boost::beast::http::field::content_type, "text/plain");
-        }
-    }
-    else
-    {
-        // Default to text/html for GET responses (serving files)
-        res.set(boost::beast::http::field::content_type, "text/html");
-    }
+    std::string target(req.target().data(), req.target().size());
+    res.set(boost::beast::http::field::content_type, mimeTypeForTarget(target));
     res.keep_alive(req.keep_alive());
 }
