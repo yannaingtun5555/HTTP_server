@@ -20,6 +20,15 @@ CONFIG_FILE="./server.conf"
 LOGS_DIR="./logs/server_log"
 WEB_ROOT="/var/www/html"
 
+# ── Admin panel settings ──────────────────────────────────────
+ADMIN_DIR="$SCRIPT_DIR/admin_panel"
+ADMIN_PID_FILE="/tmp/admin_panel.pid"
+ADMIN_LOG_FILE="./logs/admin_panel.log"
+PG_CONTAINER_NAME="pg_server_db"
+PG_IMAGE="postgres:15-alpine"
+PYTHON="/home/yan9htun/.pyenv/versions/3.12.13/bin/python3"
+GUNICORN="/home/yan9htun/.pyenv/versions/3.12.13/bin/gunicorn"
+
 mkdir -p ./logs
 
 setup_permissions() {
@@ -89,6 +98,144 @@ update_config() {
     fi
 }
 
+# ── Admin panel helpers ───────────────────────────────────────
+
+admin_pg_running() {
+    docker inspect -f '{{.State.Running}}' "$PG_CONTAINER_NAME" 2>/dev/null | grep -q 'true'
+}
+
+admin_panel_running() {
+    # Primary: check PID file
+    if [ -f "$ADMIN_PID_FILE" ]; then
+        local pid
+        pid=$(cat "$ADMIN_PID_FILE" 2>/dev/null)
+        [ -n "$pid" ] && ps -p "$pid" > /dev/null 2>&1 && return 0
+    fi
+    # Fallback: look for a gunicorn process bound to 8080
+    pgrep -f 'gunicorn.*admin_panel.wsgi' > /dev/null 2>&1
+}
+
+start_admin_panel() {
+    echo ""
+    echo "[Admin] Starting PostgreSQL..."
+
+    # If the container exists but is stopped, just start it; otherwise create it
+    if docker inspect "$PG_CONTAINER_NAME" > /dev/null 2>&1; then
+        docker start "$PG_CONTAINER_NAME" > /dev/null 2>&1
+    else
+        docker run -d --name "$PG_CONTAINER_NAME" \
+            -e POSTGRES_DB=server_db \
+            -e POSTGRES_USER=admin \
+            -e POSTGRES_PASSWORD=changeme \
+            -p 127.0.0.1:5432:5432 \
+            "$PG_IMAGE" > /dev/null 2>&1
+    fi
+
+    # Wait for PostgreSQL to be ready (up to 20 s)
+    local retries=20
+    printf "[Admin] Waiting for PostgreSQL"
+    while [ $retries -gt 0 ]; do
+        if docker exec "$PG_CONTAINER_NAME" pg_isready -U admin -d server_db > /dev/null 2>&1; then
+            echo " ready."
+            break
+        fi
+        printf "."
+        sleep 1
+        retries=$((retries - 1))
+    done
+
+    if [ $retries -eq 0 ]; then
+        echo " TIMEOUT. Check Docker."
+        return 1
+    fi
+
+    # Apply schema (idempotent — uses IF NOT EXISTS)
+    docker exec -i "$PG_CONTAINER_NAME" \
+        psql -U admin -d server_db < "$SCRIPT_DIR/DB/schema.sql" > /dev/null 2>&1
+
+    # Run Django migrations (subshell keeps cwd intact)
+    ( cd "$ADMIN_DIR" && "$PYTHON" manage.py migrate --run-syncdb > /dev/null 2>&1 )
+
+    echo "[Admin] Starting admin panel (gunicorn)..."
+
+    # Kill any stale gunicorn process on 8080 before starting fresh
+    if admin_panel_running; then
+        pkill -f 'gunicorn.*admin_panel.wsgi' 2>/dev/null
+        sleep 1
+        rm -f "$ADMIN_PID_FILE"
+    fi
+
+    # Start gunicorn in a subshell so cwd is not changed for the parent
+    ( cd "$ADMIN_DIR" && \
+        "$GUNICORN" \
+            --bind 127.0.0.1:8080 \
+            --workers 2 \
+            --pid "$ADMIN_PID_FILE" \
+            --log-file "$SCRIPT_DIR/$ADMIN_LOG_FILE" \
+            --daemon \
+            admin_panel.wsgi:application )
+
+    # Wait up to 5 s for gunicorn to write its PID file
+    local g_wait=5
+    while [ $g_wait -gt 0 ]; do
+        if admin_panel_running; then break; fi
+        sleep 1
+        g_wait=$((g_wait - 1))
+    done
+
+    if admin_panel_running; then
+        local admin_pid
+        admin_pid=$(cat "$ADMIN_PID_FILE" 2>/dev/null || pgrep -f 'gunicorn.*admin_panel.wsgi' | head -1)
+        echo "[Admin] Admin panel running (PID: $admin_pid)."
+        echo "[Admin] Access at: http://localhost:8000/_admin/"
+    else
+        echo "[Admin] WARNING: Admin panel failed to start. Check $ADMIN_LOG_FILE"
+    fi
+}
+
+stop_admin_panel() {
+    echo ""
+    if admin_panel_running; then
+        echo "[Admin] Stopping admin panel (gunicorn)..."
+        # Kill master + all workers by matching the process name
+        pkill -f 'gunicorn.*admin_panel.wsgi' 2>/dev/null
+        sleep 2
+        # Force-kill any survivors
+        pkill -9 -f 'gunicorn.*admin_panel.wsgi' 2>/dev/null
+        rm -f "$ADMIN_PID_FILE"
+        echo "[Admin] Admin panel stopped."
+    else
+        echo "[Admin] Admin panel is not running."
+        rm -f "$ADMIN_PID_FILE"
+    fi
+
+    if admin_pg_running; then
+        echo "[Admin] Stopping PostgreSQL container..."
+        docker stop "$PG_CONTAINER_NAME" > /dev/null 2>&1
+        echo "[Admin] PostgreSQL stopped."
+    fi
+}
+
+status_admin_panel() {
+    echo ""
+    echo "  --- Admin Panel ---"
+    if admin_panel_running; then
+        local admin_pid
+        admin_pid=$(cat "$ADMIN_PID_FILE" 2>/dev/null || pgrep -f 'gunicorn.*admin_panel.wsgi' | head -1)
+        echo "  Django/gunicorn : RUNNING  (PID: $admin_pid)"
+        echo "  Access URL      : http://localhost:8000/_admin/"
+    else
+        echo "  Django/gunicorn : STOPPED"
+    fi
+    if admin_pg_running; then
+        echo "  PostgreSQL      : RUNNING  (Docker: $PG_CONTAINER_NAME)"
+    else
+        echo "  PostgreSQL      : STOPPED"
+    fi
+}
+
+# ── Main server start helper ───────────────────────────────────
+
 start_server() {
     local mode="$1"   # start | reverse
     local label="$2"
@@ -105,6 +252,9 @@ start_server() {
         setup_permissions
     fi
 
+    # Start admin panel first so it's ready when C++ server comes up
+    start_admin_panel
+
     nohup "$EXECUTABLE" "$mode" >> "$LOG_FILE" 2>&1 &
     local pid=$!
     echo "$pid" > "$PID_FILE"
@@ -119,6 +269,7 @@ start_server() {
         return 1
     fi
 
+    echo ""
     echo "Server started in $label mode (PID: $pid)."
     echo "Logs: $LOG_FILE"
     echo "Stop with: $0 stop"
@@ -136,31 +287,33 @@ stop() {
     if ! is_running; then
         echo "Server is not running."
         rm -f "$PID_FILE" "$MODE_FILE"
-        return 0
-    fi
+    else
+        local pid mode
+        pid=$(cat "$PID_FILE")
+        mode=$(get_mode)
 
-    local pid mode
-    pid=$(cat "$PID_FILE")
-    mode=$(get_mode)
+        echo "Stopping server (PID: $pid, mode: $mode)..."
 
-    echo "Stopping server (PID: $pid, mode: $mode)..."
+        kill "$pid" 2>/dev/null
 
-    kill "$pid" 2>/dev/null
+        for _ in 1 2 3 4 5; do
+            if ! ps -p "$pid" > /dev/null 2>&1; then
+                break
+            fi
+            sleep 1
+        done
 
-    for _ in 1 2 3 4 5; do
-        if ! ps -p "$pid" > /dev/null 2>&1; then
-            break
+        if ps -p "$pid" > /dev/null 2>&1; then
+            echo "Process did not exit gracefully, sending SIGKILL..."
+            kill -9 "$pid" 2>/dev/null
         fi
-        sleep 1
-    done
 
-    if ps -p "$pid" > /dev/null 2>&1; then
-        echo "Process did not exit gracefully, sending SIGKILL..."
-        kill -9 "$pid" 2>/dev/null
+        rm -f "$PID_FILE" "$MODE_FILE"
+        echo "Server stopped. Log file kept at $LOG_FILE."
     fi
 
-    rm -f "$PID_FILE" "$MODE_FILE"
-    echo "Server stopped. Log file kept at $LOG_FILE."
+    # Always stop admin panel alongside the main server
+    stop_admin_panel
 }
 
 status() {
@@ -172,6 +325,7 @@ status() {
     else
         echo "Server is not running."
     fi
+    status_admin_panel
 }
 
 log() {
@@ -215,9 +369,11 @@ help() {
     echo
     echo "Server commands:"
     echo "  start        Start in platform mode (virtual-host static + K8s backends)"
+    echo "               Also auto-starts: PostgreSQL (Docker) + Admin Panel (gunicorn)"
     echo "  reverse      Start in legacy REVERSE PROXY mode (background)"
-    echo "  stop         Stop the server"
-    echo "  status       Show PID and running mode"
+    echo "               Also auto-starts: PostgreSQL (Docker) + Admin Panel (gunicorn)"
+    echo "  stop         Stop the server + admin panel + PostgreSQL"
+    echo "  status       Show PID, running mode, and admin panel status"
     echo "  log          Tail the server log"
     echo "  restart      Restart in the same mode as last run"
     echo "  config <key> <value>  Update server.conf"
@@ -229,6 +385,10 @@ help() {
     echo "  delete-site <domain>  Delete a site and its K8s containers"
     echo "  site-logs <domain>  Stream K8s BE pod logs for a site"
     echo "  help         Show this help"
+    echo
+    echo "Admin panel:"
+    echo "  URL          http://localhost:8000/_admin/"
+    echo "  Log          $ADMIN_LOG_FILE"
 }
 
 # ── Platform commands ─────────────────────────────────────────
