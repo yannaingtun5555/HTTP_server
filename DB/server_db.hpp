@@ -98,6 +98,8 @@ public:
     int  insertBeContainer(const BeContainerRecord& r);
     bool updateBeContainer(const BeContainerRecord& r);
     bool getBeContainer(int domain_id, BeContainerRecord& out);
+    bool deleteBeContainersForDomain(int domain_id);
+    bool deleteDbContainersForDomain(int domain_id);
 
     // ── pages ────────────────────────────────────────────────
     bool clearPagesForDomain(int domain_id);

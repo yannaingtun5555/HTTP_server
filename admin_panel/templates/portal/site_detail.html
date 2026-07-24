@@ -11,9 +11,13 @@
 {% block content %}
 <div class="page-header">
   <h1>{{ site.domain }}</h1>
-  <div style="display:flex;gap:.75rem;">
+  <div style="display:flex;gap:.75rem;align-items:center;">
     <a href="/_admin/" class="btn btn-secondary btn-sm">← Dashboard</a>
     <a href="/_admin/site/{{ site.domain }}/delete/" class="btn btn-danger btn-sm">Delete Site</a>
+    <a id="poll-done-hint" href="" onclick="location.reload();return false;"
+       class="btn btn-success btn-sm" style="display:none;">
+      🔄 Refresh
+    </a>
   </div>
 </div>
 
@@ -150,7 +154,8 @@
 <script>
 (function () {
   const POLL_INTERVAL = 3000;
-  const TERMINAL_STATUSES = ['running', 'error', 'stopped'];
+  // 'skipped' = static site (no BE container spun up) — terminal, no need to poll
+  const TERMINAL_STATUSES = ['running', 'error', 'stopped', 'skipped', 'deleted'];
   const domain = '{{ site.domain|escapejs }}';
   const statusUrl = '/_admin/site/' + domain + '/status.json';
 
@@ -158,11 +163,13 @@
     return 'badge badge-' + status;
   }
 
-  function shouldPoll() {
+  function getSiteBadgeStatus() {
     const badge = document.getElementById('status-badge');
-    if (!badge) return false;
-    const status = badge.textContent.trim();
-    return !TERMINAL_STATUSES.includes(status);
+    return badge ? badge.textContent.trim() : '';
+  }
+
+  function shouldPoll() {
+    return !TERMINAL_STATUSES.includes(getSiteBadgeStatus());
   }
 
   function updateBadge(el, newStatus) {
@@ -173,21 +180,23 @@
     }
   }
 
+  function showRefreshHint() {
+    const hint = document.getElementById('poll-done-hint');
+    if (hint) hint.style.display = 'inline-flex';
+  }
+
   function poll() {
-    if (!shouldPoll()) return;
+    if (!shouldPoll()) { showRefreshHint(); return; }
 
     fetch(statusUrl)
       .then(function (r) { return r.json(); })
       .then(function (data) {
-        // Update main status badge
         updateBadge(document.getElementById('status-badge'), data.status);
 
-        // Update BE status badge
         if (data.be) {
           updateBadge(document.getElementById('be-status-badge'), data.be.status);
         }
 
-        // Update DB status badges
         if (data.dbs && Array.isArray(data.dbs)) {
           data.dbs.forEach(function (db) {
             var badges = document.querySelectorAll('.db-status-badge[data-db-id="' + db.id + '"]');
@@ -195,18 +204,17 @@
           });
         }
 
-        // Keep polling if still in progress
         if (shouldPoll()) {
           setTimeout(poll, POLL_INTERVAL);
+        } else {
+          showRefreshHint();
         }
       })
       .catch(function () {
-        // Retry on network error
         setTimeout(poll, POLL_INTERVAL * 2);
       });
   }
 
-  // Start polling if status is pending/building
   if (shouldPoll()) {
     setTimeout(poll, POLL_INTERVAL);
   }

@@ -29,12 +29,12 @@ class SiteStep1Form(forms.Form):
     domain = forms.CharField(max_length=255, label='Domain name')
     user_owner = forms.CharField(max_length=255, label='Owner username', required=False)
     fe_folder = forms.CharField(max_length=1024, label='FE source folder path')
-    be_folder = forms.CharField(max_length=1024, label='BE source folder path')
+    be_folder = forms.CharField(max_length=1024, label='BE source folder path', required=False)
     be_type = forms.ChoiceField(choices=BE_TYPES, label='Backend type')
     run_cmd = forms.CharField(max_length=1024, label='Run command (inside container)', required=False)
-    be_port = forms.IntegerField(initial=3000, label='Backend port')
+    be_port = forms.IntegerField(initial=3000, label='Backend port', required=False)
     fe_build = forms.ChoiceField(choices=FE_BUILDS, label='FE build system')
-    db_count = forms.IntegerField(initial=1, min_value=0, max_value=10, label='Number of databases')
+    db_count = forms.IntegerField(initial=0, min_value=0, max_value=10, label='Number of databases')
 
 
 class DbCredentialForm(forms.Form):

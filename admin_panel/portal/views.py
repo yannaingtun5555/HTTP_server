@@ -98,10 +98,10 @@ def deploy_site(request):
         'domain': step1.get('domain'),
         'user_owner': step1.get('user_owner', ''),
         'fe_folder': step1.get('fe_folder', ''),
-        'be_folder': step1.get('be_folder', ''),
+        'be_folder': step1.get('be_folder', '') or '',
         'be_type': step1.get('be_type', ''),
         'run_cmd': step1.get('run_cmd', ''),
-        'be_port': step1.get('be_port', 3000),
+        'be_port': step1.get('be_port') or 0,
         'fe_build': step1.get('fe_build', ''),
         'dbs': db_credentials,
     }

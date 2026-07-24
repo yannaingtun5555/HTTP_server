@@ -18,20 +18,68 @@
   <div class="card-title">Site &amp; Backend Configuration</div>
   <form method="post" id="step1-form">
     {% csrf_token %}
-    {% for field in form %}
+
     <div class="form-group">
-      <label for="{{ field.id_for_label }}">{{ field.label }}</label>
-      {{ field }}
-      {% if field.errors %}
-        <ul class="errorlist">
-          {% for error in field.errors %}<li>{{ error }}</li>{% endfor %}
-        </ul>
-      {% endif %}
-      {% if field.help_text %}
-        <small class="text-muted">{{ field.help_text }}</small>
-      {% endif %}
+      <label for="{{ form.domain.id_for_label }}">{{ form.domain.label }}</label>
+      {{ form.domain }}
+      {% if form.domain.errors %}<ul class="errorlist">{% for e in form.domain.errors %}<li>{{ e }}</li>{% endfor %}</ul>{% endif %}
+      <small class="text-muted">e.g. <code>myapp.example.com</code> or <code>localhost</code></small>
     </div>
-    {% endfor %}
+
+    <div class="form-group">
+      <label for="{{ form.user_owner.id_for_label }}">{{ form.user_owner.label }}</label>
+      {{ form.user_owner }}
+      {% if form.user_owner.errors %}<ul class="errorlist">{% for e in form.user_owner.errors %}<li>{{ e }}</li>{% endfor %}</ul>{% endif %}
+    </div>
+
+    <div class="form-group">
+      <label for="{{ form.fe_folder.id_for_label }}">{{ form.fe_folder.label }}</label>
+      {{ form.fe_folder }}
+      {% if form.fe_folder.errors %}<ul class="errorlist">{% for e in form.fe_folder.errors %}<li>{{ e }}</li>{% endfor %}</ul>{% endif %}
+      <small class="text-muted">Absolute or relative path to the frontend source folder (e.g. <code>./sites/myapp/fe</code>). The server will copy built output to its public directory.</small>
+    </div>
+
+    <div class="form-group">
+      <label for="{{ form.be_folder.id_for_label }}">{{ form.be_folder.label }}</label>
+      {{ form.be_folder }}
+      {% if form.be_folder.errors %}<ul class="errorlist">{% for e in form.be_folder.errors %}<li>{{ e }}</li>{% endfor %}</ul>{% endif %}
+      <small class="text-muted">Path to backend source folder (e.g. <code>./sites/myapp/be</code>). Leave empty for static-only sites.</small>
+    </div>
+
+    <div class="form-group">
+      <label for="{{ form.be_type.id_for_label }}">{{ form.be_type.label }}</label>
+      {{ form.be_type }}
+      {% if form.be_type.errors %}<ul class="errorlist">{% for e in form.be_type.errors %}<li>{{ e }}</li>{% endfor %}</ul>{% endif %}
+    </div>
+
+    <div class="form-group">
+      <label for="{{ form.run_cmd.id_for_label }}">{{ form.run_cmd.label }}</label>
+      {{ form.run_cmd }}
+      {% if form.run_cmd.errors %}<ul class="errorlist">{% for e in form.run_cmd.errors %}<li>{{ e }}</li>{% endfor %}</ul>{% endif %}
+      <small class="text-muted">Command to start the backend inside its container (e.g. <code>node index.js</code> or <code>python app.py</code>). Leave empty for static sites.</small>
+    </div>
+
+    <div class="form-group">
+      <label for="{{ form.be_port.id_for_label }}">{{ form.be_port.label }}</label>
+      {{ form.be_port }}
+      {% if form.be_port.errors %}<ul class="errorlist">{% for e in form.be_port.errors %}<li>{{ e }}</li>{% endfor %}</ul>{% endif %}
+      <small class="text-muted">Port the backend listens on inside its container.</small>
+    </div>
+
+    <div class="form-group">
+      <label for="{{ form.fe_build.id_for_label }}">{{ form.fe_build.label }}</label>
+      {{ form.fe_build }}
+      {% if form.fe_build.errors %}<ul class="errorlist">{% for e in form.fe_build.errors %}<li>{{ e }}</li>{% endfor %}</ul>{% endif %}
+      <small class="text-muted">Select <strong>None (bare HTML)</strong> if your frontend is pre-built plain HTML.</small>
+    </div>
+
+    <div class="form-group">
+      <label for="{{ form.db_count.id_for_label }}">{{ form.db_count.label }}</label>
+      {{ form.db_count }}
+      {% if form.db_count.errors %}<ul class="errorlist">{% for e in form.db_count.errors %}<li>{{ e }}</li>{% endfor %}</ul>{% endif %}
+      <small class="text-muted">Number of databases to provision (0–10). Each database will be configured in Step 2.</small>
+    </div>
+
     <div class="mt-2" style="display:flex;gap:.75rem;align-items:center;">
       <button type="submit" class="btn btn-primary">Next →</button>
       <a href="/_admin/" class="btn btn-secondary">Cancel</a>

@@ -503,3 +503,44 @@ bool ServerDB::getBeContainer(int domain_id, BeContainerRecord& out)
         return false;
     }
 }
+
+// ─────────────────────────────────────────────────────────────
+//  deleteBeContainersForDomain — wipe old BE rows before re-deploy
+// ─────────────────────────────────────────────────────────────
+bool ServerDB::deleteBeContainersForDomain(int domain_id)
+{
+    if (!ready()) return false;
+    try
+    {
+        pqxx::work txn(*conn_);
+        txn.exec_params("DELETE FROM be_containers WHERE domain_id=$1", domain_id);
+        txn.commit();
+        return true;
+    }
+    catch (const std::exception& e)
+    {
+        std::cerr << "[ServerDB] deleteBeContainersForDomain: " << e.what() << "\n";
+        return false;
+    }
+}
+
+// ─────────────────────────────────────────────────────────────
+//  deleteDbContainersForDomain — wipe old DB rows before re-deploy
+// ─────────────────────────────────────────────────────────────
+bool ServerDB::deleteDbContainersForDomain(int domain_id)
+{
+    if (!ready()) return false;
+    try
+    {
+        pqxx::work txn(*conn_);
+        txn.exec_params("DELETE FROM db_containers WHERE domain_id=$1", domain_id);
+        txn.commit();
+        return true;
+    }
+    catch (const std::exception& e)
+    {
+        std::cerr << "[ServerDB] deleteDbContainersForDomain: " << e.what() << "\n";
+        return false;
+    }
+}
+

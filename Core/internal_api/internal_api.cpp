@@ -298,6 +298,10 @@ bool InternalApiHandler::runDeploy(
     }
     int domain_id = stored.id;
 
+    // 1b) Clean up stale container records from any previous deploy
+    server_db.deleteBeContainersForDomain(domain_id);
+    server_db.deleteDbContainersForDomain(domain_id);
+
     // 2) Build FE into the public folder
     std::string public_dir = server_config.sites_root + "/" + site.domain + "/public";
     std::string fe_error;

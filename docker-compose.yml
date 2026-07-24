@@ -1,0 +1,132 @@
+# ============================================================
+#  docker-compose.yml — HTTP Server full-stack test
+#
+#  Services:
+#    pg         — PostgreSQL 15 (server DB — shared by admin + test BE)
+#    test-db    — PostgreSQL 15 (dedicated DB for the test site)
+#    admin      — Django admin panel (proxy target for /_admin/)
+#    test-be    — Flask backend (proxy target for /api/ on test.local)
+#    http-srv   — C++ HTTP Server (main entry point, port 8000)
+# ============================================================
+
+services:
+
+  # ── PostgreSQL: server state DB (used by C++ server + admin panel) ──
+  pg:
+    image: postgres:15-alpine
+    container_name: pg_server_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB:       server_db
+      POSTGRES_USER:     admin
+      POSTGRES_PASSWORD: changeme
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin -d server_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ── PostgreSQL: dedicated DB for the test website ──
+  test-db:
+    image: postgres:15-alpine
+    container_name: pg_test_site
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB:       testsite
+      POSTGRES_USER:     testuser
+      POSTGRES_PASSWORD: testpass
+    volumes:
+      - test_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U testuser -d testsite"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ── Django admin panel ──
+  admin:
+    build:
+      context: ./admin_panel
+      dockerfile: Dockerfile
+    container_name: admin_panel
+    restart: unless-stopped
+    environment:
+      DJANGO_SETTINGS_MODULE: admin_panel.settings
+      DATABASE_URL: "postgresql://admin:changeme@pg:5432/server_db"
+      INTERNAL_API_URL: "http://http-srv:8000/_api/internal"
+      INTERNAL_API_SECRET: "changeme-secret"
+      DEBUG: "True"
+    depends_on:
+      pg:
+        condition: service_healthy
+    expose:
+      - "8080"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8080/')\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Test site Flask backend ──
+  test-be:
+    build:
+      context: ./test/be
+      dockerfile: Dockerfile
+    container_name: test_site_be
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: "postgresql://testuser:testpass@test-db:5432/testsite"
+      PORT: "5000"
+    depends_on:
+      test-db:
+        condition: service_healthy
+    expose:
+      - "5000"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:5000/api/healthz')\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── C++ HTTP Server ──
+  http-srv:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: http_server
+    restart: unless-stopped
+    environment:
+      # Override backend addresses to point at Docker service names
+      ADMIN_BACKEND_HOST: admin
+      ADMIN_BACKEND_PORT: "8080"
+    volumes:
+      - ./server.conf:/app/server.conf:ro
+      - ./sites.conf:/app/sites.conf:ro
+      - ./sites:/app/sites
+      - ./var:/app/var:ro
+      - ./DB/schema.sql:/app/DB/schema.sql:ro
+      - ./logs:/app/logs
+    ports:
+      - "8000:8000"
+    depends_on:
+      pg:
+        condition: service_healthy
+      admin:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8000/ > /dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  pg_data:
+  test_db_data:
+
+networks:
+  default:
+    name: http_server_net
