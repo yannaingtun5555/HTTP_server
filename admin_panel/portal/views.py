@@ -3,6 +3,7 @@ from django.conf import settings
 from django.db import DatabaseError, OperationalError
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.views.decorators.csrf import csrf_exempt
 
 from .forms import DbCredentialForm, SiteStep1Form
 from .models import BeContainer, DbContainer, Domain, Page
@@ -98,10 +99,10 @@ def deploy_site(request):
         'domain': step1.get('domain'),
         'user_owner': step1.get('user_owner', ''),
         'fe_folder': step1.get('fe_folder', ''),
-        'be_folder': step1.get('be_folder', ''),
+        'be_folder': step1.get('be_folder', '') or '',
         'be_type': step1.get('be_type', ''),
         'run_cmd': step1.get('run_cmd', ''),
-        'be_port': step1.get('be_port', 3000),
+        'be_port': step1.get('be_port') or 0,
         'fe_build': step1.get('fe_build', ''),
         'dbs': db_credentials,
     }
@@ -223,3 +224,47 @@ def site_status(request, domain):
             for p in pages
         ],
     })
+
+
+def site_logs(request, domain):
+    """Return JSON with real-time K8s pod logs for a domain."""
+    result = {'success': False, 'logs': ''}
+    try:
+        response = http_requests.get(
+            INTERNAL_API_URL + '/logs/' + domain,
+            headers={'X-Internal-Secret': INTERNAL_API_SECRET},
+            timeout=10,
+        )
+        if response.status_code == 200:
+            data = response.json()
+            result['success'] = True
+            result['logs'] = data.get('logs', '')
+        else:
+            result['logs'] = f'Error fetching logs ({response.status_code})'
+    except http_requests.exceptions.RequestException as exc:
+        result['logs'] = f'Connection error: {exc}'
+
+    return JsonResponse(result)
+
+
+@csrf_exempt
+def github_webhook(request, domain):
+    """Receive push events from GitHub/GitLab webhooks to trigger auto-deploy."""
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
+
+    event = request.headers.get('X-GitHub-Event', request.headers.get('X-Gitlab-Event', 'push'))
+
+    try:
+        response = http_requests.post(
+            INTERNAL_API_URL + '/reload',
+            headers={'X-Internal-Secret': INTERNAL_API_SECRET},
+            timeout=10,
+        )
+        return JsonResponse({
+            'success': True,
+            'message': f'Auto-deploy triggered for {domain} (event: {event})',
+            'api_status': response.status_code
+        })
+    except http_requests.exceptions.RequestException as exc:
+        return JsonResponse({'success': False, 'error': str(exc)}, status=500)

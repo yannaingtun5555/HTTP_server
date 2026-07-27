@@ -12,6 +12,9 @@ struct ServerConfig
     // ── Network ──────────────────────────────────────────────
     std::string host        = "0.0.0.0";
     unsigned int port       = 80;
+    bool ssl_enabled        = false;
+    std::string ssl_cert_path = "./server.crt";
+    std::string ssl_key_path  = "./server.key";
 
     // ── Performance ──────────────────────────────────────────
     int thread_pool_size    = 0;   // 0 = auto (hardware_concurrency)

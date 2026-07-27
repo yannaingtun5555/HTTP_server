@@ -154,6 +154,9 @@ InternalApiHandler::handle(const http::request<http::dynamic_body>& req,
     if (path_suffix.rfind("/delete/", 0) == 0 && method == "DELETE")
         return handleDelete(path_suffix.substr(8), ver, keep);
 
+    if (path_suffix.rfind("/logs/", 0) == 0 && method == "GET")
+        return handleLogs(path_suffix.substr(6), ver, keep);
+
     if (path_suffix == "/reload" && method == "POST")
         return handleReload(ver, keep);
 
@@ -297,6 +300,10 @@ bool InternalApiHandler::runDeploy(
         return false;
     }
     int domain_id = stored.id;
+
+    // 1b) Clean up stale container records from any previous deploy
+    server_db.deleteBeContainersForDomain(domain_id);
+    server_db.deleteDbContainersForDomain(domain_id);
 
     // 2) Build FE into the public folder
     std::string public_dir = server_config.sites_root + "/" + site.domain + "/public";
@@ -490,4 +497,29 @@ InternalApiHandler::handleReload(unsigned http_version, bool keep_alive)
     std::cout << "[InternalAPI] sites.conf hot-reloaded\n";
     return makeJson(200, R"({"success":true,"message":"sites.conf reloaded"})",
                     http_version, keep_alive);
+}
+
+// ─────────────────────────────────────────────────────────────
+//  handleLogs
+// ─────────────────────────────────────────────────────────────
+http::response<http::string_body>
+InternalApiHandler::handleLogs(const std::string& domain,
+                                unsigned http_version, bool keep_alive)
+{
+    std::string safe_domain = domain;
+    for (auto& c : safe_domain) if (c == '.') c = '-';
+    std::string ns = "site-" + safe_domain;
+    std::string deployment_name = "be-" + safe_domain;
+
+    std::string pod_logs = k8s_controller.getPodLogs(ns, deployment_name, 100);
+
+    Json::Value root;
+    root["success"] = true;
+    root["domain"]  = domain;
+    root["logs"]    = pod_logs;
+
+    Json::FastWriter w;
+    std::string out = w.write(root);
+    out.erase(std::remove(out.begin(), out.end(), '\n'), out.end());
+    return makeJson(200, out, http_version, keep_alive);
 }

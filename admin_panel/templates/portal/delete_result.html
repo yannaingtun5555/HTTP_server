@@ -3,31 +3,31 @@
 
 {% block content %}
 <div class="page-header">
-  <h1>Delete Result</h1>
+  <h1>Delete Site</h1>
 </div>
 
 {% if result.success %}
-<div class="alert alert-success">
-  ✅ Site <strong>{{ site.domain }}</strong> was successfully deleted.
+<div class="alert alert-success" style="margin-bottom:1.5rem;">
+  🗑 Site <strong>{{ site.domain }}</strong> deleted successfully.
 </div>
+
 <div class="mt-2">
   <a href="/_admin/" class="btn btn-primary">← Back to Dashboard</a>
 </div>
 
 {% else %}
-<div class="alert alert-error">
-  ❌ Failed to delete site <strong>{{ site.domain }}</strong>.
+<div class="alert alert-error" style="margin-bottom:1.5rem;">
+  ❌ Deletion failed for <strong>{{ site.domain }}</strong>.
 </div>
 
-<div class="card">
+<div class="card" style="max-width:640px;">
   <div class="card-title">Error Details</div>
   <pre style="white-space:pre-wrap;word-break:break-all;font-size:.85rem;color:var(--error);background:#fff5f5;padding:.75rem;border-radius:6px;border:1px solid #fecaca;">{{ result.error }}</pre>
 </div>
 
-<div class="mt-2">
-  <a href="/_admin/site/{{ site.domain }}/delete/" class="btn btn-danger">Try Again</a>
-  <a href="/_admin/site/{{ site.domain }}/" class="btn btn-secondary" style="margin-left:.75rem;">Back to Site</a>
-  <a href="/_admin/" class="btn btn-secondary" style="margin-left:.75rem;">Dashboard</a>
+<div class="mt-2" style="display:flex;gap:.75rem;">
+  <a href="/_admin/site/{{ site.domain }}/" class="btn btn-secondary">← Back to Site</a>
+  <a href="/_admin/" class="btn btn-primary">Dashboard</a>
 </div>
 {% endif %}
 {% endblock %}

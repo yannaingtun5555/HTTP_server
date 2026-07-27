@@ -9,4 +9,6 @@ urlpatterns = [
     path('site/<str:domain>/', views.site_detail, name='site_detail'),
     path('site/<str:domain>/delete/', views.delete_site, name='delete_site'),
     path('site/<str:domain>/status.json', views.site_status, name='site_status'),
+    path('site/<str:domain>/logs.json', views.site_logs, name='site_logs'),
+    path('webhook/<str:domain>/', views.github_webhook, name='github_webhook'),
 ]

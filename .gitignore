@@ -1,19 +1,59 @@
-# Build output
+# ── Build output ──────────────────────────────────────────────
 build/
 HTTP_Server
 *.o
 *.a
 *.out
 
-# Runtime / local state
+# ── Logs ──────────────────────────────────────────────────────
 logs/
 Error_logging.txt
+
+# ── Runtime state files ───────────────────────────────────────
 HTTP_Server.pid
 HTTP_Server.mode
 
-# Editor / OS
-*.swp
-*~
+# ── Python ────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+
+# ── Django ────────────────────────────────────────────────────
+db.sqlite3
+*.sqlite3
+admin_panel/static_collected/
+
+# ── Environment ───────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+venv/
+.venv/
+env/
+
+# ── OS / Editor ───────────────────────────────────────────────
 .DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+
+# ── Benchmark output ──────────────────────────────────────────
+benchmarks/benchmark_results.txt
+
+# ── Site data (runtime generated) ────────────────────────────
 sites/
 var/www/
+
+# ── Test Artifacts ───────────────────────────────────────────
+test_logs/
+test_sites_root/
+.pytest_cache/
+*.bak
+server_test.conf
+sites_test.conf
