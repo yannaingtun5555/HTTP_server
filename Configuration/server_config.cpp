@@ -56,6 +56,9 @@ void ServerConfig::load(const std::string& file_path)
         else if (key == "internal_api_secret")          internal_api_secret        = val;
         else if (key == "k8s_kubeconfig")               k8s_kubeconfig             = val;
         else if (key == "k8s_api_server")               k8s_api_server             = val;
+        else if (key == "ssl_enabled")                  ssl_enabled                = (val == "true" || val == "1");
+        else if (key == "ssl_cert_path")                ssl_cert_path              = val;
+        else if (key == "ssl_key_path")                 ssl_key_path               = val;
     }
 
     std::cout << "[ServerConfig] Loaded from " << file_path << "\n";

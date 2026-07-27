@@ -282,6 +282,11 @@ private:
         out->set(http::field::host, host_value.str());
 
         out->set("X-Forwarded-For", client_ip_);
+        auto host_it = client_req_->find(http::field::host);
+        if (host_it != client_req_->end())
+        {
+            out->set("X-Forwarded-Host", host_it->value());
+        }
         out->set("Via", "1.1 http_server_proxy");
         out->set("X-Proxy-By", "http_server_proxy");
 
@@ -597,4 +602,52 @@ void ProxyHandler::forwardRequest(
 {
     auto proxy = std::make_shared<ProxySession>(std::move(req), std::move(session), backend);
     proxy->start();
+}
+
+bool ProxyHandler::checkBackendHealth(const std::string& host, unsigned port, int timeout_secs)
+{
+    try {
+        asio::io_context ioc;
+        tcp::resolver resolver(ioc);
+        beast::tcp_stream stream(ioc);
+
+        auto const results = resolver.resolve(host, std::to_string(port));
+        stream.expires_after(std::chrono::seconds(timeout_secs));
+        stream.connect(results);
+        beast::error_code ec;
+        stream.socket().shutdown(tcp::socket::shutdown_both, ec);
+        stream.socket().close(ec);
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
+bool ProxyHandler::allowClientRequest(const std::string& client_ip, int max_burst, int fill_rate_per_sec)
+{
+    struct Bucket {
+        double tokens;
+        std::chrono::steady_clock::time_point last_update;
+    };
+    static std::mutex rate_mutex;
+    static std::unordered_map<std::string, Bucket> buckets;
+
+    std::lock_guard<std::mutex> lock(rate_mutex);
+    auto now = std::chrono::steady_clock::now();
+
+    auto& b = buckets[client_ip];
+    if (b.last_update.time_since_epoch().count() == 0) {
+        b.tokens = max_burst;
+        b.last_update = now;
+    }
+
+    double elapsed_sec = std::chrono::duration<double>(now - b.last_update).count();
+    b.tokens = std::min(static_cast<double>(max_burst), b.tokens + elapsed_sec * fill_rate_per_sec);
+    b.last_update = now;
+
+    if (b.tokens >= 1.0) {
+        b.tokens -= 1.0;
+        return true;
+    }
+    return false;
 }

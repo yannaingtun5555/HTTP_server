@@ -57,6 +57,14 @@ public:
                                   BeContainerRecord& record_out,
                                   int timeout_secs = 180);
 
+    // ── Kaniko Container Builder ─────────────────────────────
+    // Run an in-cluster Kaniko build job for a given git repository URL
+    bool runKanikoBuildJob(const std::string& ns,
+                           const std::string& name,
+                           const std::string& git_url,
+                           const std::string& destination_image,
+                           int timeout_secs = 300);
+
     // ── Teardown ─────────────────────────────────────────────
     bool deleteNamespace(const std::string& ns);
 
@@ -76,10 +84,15 @@ private:
     std::string token_;           // Bearer token from kubeconfig
     std::string ca_cert_path_;    // Path to CA cert for TLS verification
 
+    struct HttpResponse {
+        long code = 0;
+        std::string body;
+    };
+
     // ── libcurl helpers ──────────────────────────────────────
-    std::string curlGet (const std::string& url);
-    std::string curlPost(const std::string& url, const std::string& body);
-    std::string curlDelete(const std::string& url);
+    HttpResponse curlGet (const std::string& url);
+    HttpResponse curlPost(const std::string& url, const std::string& body);
+    HttpResponse curlDelete(const std::string& url);
 
     // ── Kubernetes manifest builders ─────────────────────────
 
@@ -88,12 +101,19 @@ private:
                                                 const std::string& name,
                                                 int size_gb);
 
-    // Ingress — Traefik host-based routing (networking.k8s.io/v1)
+    // Certificate — cert-manager.io/v1 Let's Encrypt TLS Certificate
+    std::string buildCertificateJson(const std::string& ns,
+                                      const std::string& name,
+                                      const std::string& domain,
+                                      const std::string& secret_name);
+
+    // Ingress — Traefik host-based routing (networking.k8s.io/v1) with optional TLS
     std::string buildIngressJson(const std::string& ns,
                                   const std::string& name,
                                   const std::string& domain,
                                   const std::string& backend_service_name,
-                                  int backend_port);
+                                  int backend_port,
+                                  const std::string& tls_secret_name = "");
 
     // DB Deployment with PVC mount + resource limits
     std::string buildDbDeploymentJson(const std::string& ns,
@@ -122,7 +142,7 @@ private:
     // ── API response validation ──────────────────────────────
     // Returns true if the K8s API response indicates success (200/201).
     // Logs detailed error messages with context on failure.
-    bool checkApiResponse(const std::string& response,
+    bool checkApiResponse(const HttpResponse& response,
                           const std::string& context);
 
     // ── Polling helpers ──────────────────────────────────────

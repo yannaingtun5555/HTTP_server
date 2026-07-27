@@ -5,6 +5,7 @@
 #include <vector>
 #include <memory>
 #include <pqxx/pqxx>
+#include <mutex>
 
 // Forward-declare the record structs to avoid including site_config.hpp
 // in every TU that just needs DB access.
@@ -109,6 +110,7 @@ public:
 private:
     std::unique_ptr<pqxx::connection> conn_;
     bool connected_ = false;
+    std::mutex db_mutex_;
 
     void runSchemaFile(const std::string& path);
     std::string readFile(const std::string& path);

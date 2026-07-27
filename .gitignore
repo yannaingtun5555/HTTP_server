@@ -49,3 +49,11 @@ benchmarks/benchmark_results.txt
 # ── Site data (runtime generated) ────────────────────────────
 sites/
 var/www/
+
+# ── Test Artifacts ───────────────────────────────────────────
+test_logs/
+test_sites_root/
+.pytest_cache/
+*.bak
+server_test.conf
+sites_test.conf

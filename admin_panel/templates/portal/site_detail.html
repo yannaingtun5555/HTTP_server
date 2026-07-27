@@ -150,6 +150,15 @@
   {% endif %}
 </div>
 
+<!-- Live Pod Logs Terminal -->
+<div class="card" style="padding:1.5rem;">
+  <div class="card-title" style="display:flex;justify-content:space-between;align-items:center;">
+    <span>Live Pod Logs Terminal</span>
+    <span class="badge badge-building">Real-Time (3s)</span>
+  </div>
+  <pre id="pod-logs-terminal" style="white-space:pre-wrap;word-break:break-all;font-size:.8rem;color:#38bdf8;background:#0f172a;padding:1rem;border-radius:8px;max-height:300px;overflow-y:auto;font-family:monospace;">Fetching container logs...</pre>
+</div>
+
 <!-- Auto-refresh polling script -->
 <script>
 (function () {
@@ -215,9 +224,32 @@
       });
   }
 
+  const logsUrl = '/_admin/site/' + domain + '/logs.json';
+
+  function fetchLogs() {
+    const term = document.getElementById('pod-logs-terminal');
+    if (!term) return;
+    fetch(logsUrl)
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (data.logs) {
+          term.textContent = data.logs;
+          term.scrollTop = term.scrollHeight;
+        } else {
+          term.textContent = 'No log output recorded yet.';
+        }
+      })
+      .catch(function (err) {
+        term.textContent = 'Log stream error: ' + err.message;
+      });
+  }
+
   if (shouldPoll()) {
     setTimeout(poll, POLL_INTERVAL);
   }
+
+  setInterval(fetchLogs, POLL_INTERVAL);
+  fetchLogs();
 })();
 </script>
 {% endblock %}

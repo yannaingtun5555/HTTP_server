@@ -46,6 +46,7 @@ void ServerDB::runSchemaFile(const std::string& path)
 bool ServerDB::connect(const std::string& conn_string,
                        const std::string& schema_sql_path)
 {
+    std::lock_guard<std::mutex> lock(db_mutex_);
     try
     {
         conn_ = std::make_unique<pqxx::connection>(conn_string);
@@ -70,6 +71,7 @@ bool ServerDB::connect(const std::string& conn_string,
 
 void ServerDB::disconnect()
 {
+    std::lock_guard<std::mutex> lock(db_mutex_);
     conn_.reset();
     connected_ = false;
 }
@@ -79,6 +81,7 @@ void ServerDB::disconnect()
 // ─────────────────────────────────────────────────────────────
 int ServerDB::insertDomain(const DomainRecord& d)
 {
+    std::lock_guard<std::mutex> lock(db_mutex_);
     if (!ready()) return -1;
     try
     {
@@ -105,6 +108,7 @@ int ServerDB::insertDomain(const DomainRecord& d)
 
 bool ServerDB::upsertDomain(const DomainRecord& d)
 {
+    std::lock_guard<std::mutex> lock(db_mutex_);
     if (!ready()) return false;
     try
     {
@@ -148,6 +152,7 @@ bool ServerDB::upsertDomain(const DomainRecord& d)
 bool ServerDB::updateDomainStatus(int id, const std::string& status,
                                   const std::string& error)
 {
+    std::lock_guard<std::mutex> lock(db_mutex_);
     if (!ready()) return false;
     try
     {
@@ -167,6 +172,7 @@ bool ServerDB::updateDomainStatus(int id, const std::string& status,
 
 bool ServerDB::getDomain(const std::string& domain, DomainRecord& out)
 {
+    std::lock_guard<std::mutex> lock(db_mutex_);
     if (!ready()) return false;
     try
     {
@@ -207,6 +213,7 @@ bool ServerDB::getDomain(const std::string& domain, DomainRecord& out)
 
 std::vector<DomainRecord> ServerDB::allDomains()
 {
+    std::lock_guard<std::mutex> lock(db_mutex_);
     std::vector<DomainRecord> result;
     if (!ready()) return result;
     try
@@ -250,6 +257,7 @@ std::vector<DomainRecord> ServerDB::allDomains()
 
 bool ServerDB::deleteDomain(int id)
 {
+    std::lock_guard<std::mutex> lock(db_mutex_);
     if (!ready()) return false;
     try
     {
@@ -270,6 +278,7 @@ bool ServerDB::deleteDomain(int id)
 // ─────────────────────────────────────────────────────────────
 bool ServerDB::clearPagesForDomain(int domain_id)
 {
+    std::lock_guard<std::mutex> lock(db_mutex_);
     if (!ready()) return false;
     try
     {
@@ -287,6 +296,7 @@ bool ServerDB::clearPagesForDomain(int domain_id)
 
 bool ServerDB::upsertPage(const PageRecord& p)
 {
+    std::lock_guard<std::mutex> lock(db_mutex_);
     if (!ready()) return false;
     try
     {
@@ -311,6 +321,7 @@ bool ServerDB::upsertPage(const PageRecord& p)
 
 std::vector<PageRecord> ServerDB::pagesForDomain(int domain_id)
 {
+    std::lock_guard<std::mutex> lock(db_mutex_);
     std::vector<PageRecord> result;
     if (!ready()) return result;
     try
@@ -344,6 +355,7 @@ std::vector<PageRecord> ServerDB::pagesForDomain(int domain_id)
 // ─────────────────────────────────────────────────────────────
 int ServerDB::insertDbContainer(const DbContainerRecord& r)
 {
+    std::lock_guard<std::mutex> lock(db_mutex_);
     if (!ready()) return -1;
     try
     {
@@ -367,6 +379,7 @@ int ServerDB::insertDbContainer(const DbContainerRecord& r)
 
 bool ServerDB::updateDbContainer(const DbContainerRecord& r)
 {
+    std::lock_guard<std::mutex> lock(db_mutex_);
     if (!ready()) return false;
     try
     {
@@ -389,6 +402,7 @@ bool ServerDB::updateDbContainer(const DbContainerRecord& r)
 
 std::vector<DbContainerRecord> ServerDB::dbContainersForDomain(int domain_id)
 {
+    std::lock_guard<std::mutex> lock(db_mutex_);
     std::vector<DbContainerRecord> result;
     if (!ready()) return result;
     try
@@ -430,6 +444,7 @@ std::vector<DbContainerRecord> ServerDB::dbContainersForDomain(int domain_id)
 // ─────────────────────────────────────────────────────────────
 int ServerDB::insertBeContainer(const BeContainerRecord& r)
 {
+    std::lock_guard<std::mutex> lock(db_mutex_);
     if (!ready()) return -1;
     try
     {
@@ -453,6 +468,7 @@ int ServerDB::insertBeContainer(const BeContainerRecord& r)
 
 bool ServerDB::updateBeContainer(const BeContainerRecord& r)
 {
+    std::lock_guard<std::mutex> lock(db_mutex_);
     if (!ready()) return false;
     try
     {
@@ -473,6 +489,7 @@ bool ServerDB::updateBeContainer(const BeContainerRecord& r)
 
 bool ServerDB::getBeContainer(int domain_id, BeContainerRecord& out)
 {
+    std::lock_guard<std::mutex> lock(db_mutex_);
     if (!ready()) return false;
     try
     {
@@ -509,6 +526,7 @@ bool ServerDB::getBeContainer(int domain_id, BeContainerRecord& out)
 // ─────────────────────────────────────────────────────────────
 bool ServerDB::deleteBeContainersForDomain(int domain_id)
 {
+    std::lock_guard<std::mutex> lock(db_mutex_);
     if (!ready()) return false;
     try
     {
@@ -529,6 +547,7 @@ bool ServerDB::deleteBeContainersForDomain(int domain_id)
 // ─────────────────────────────────────────────────────────────
 bool ServerDB::deleteDbContainersForDomain(int domain_id)
 {
+    std::lock_guard<std::mutex> lock(db_mutex_);
     if (!ready()) return false;
     try
     {

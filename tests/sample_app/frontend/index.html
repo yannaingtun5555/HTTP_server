@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sample App Hosted on HTTP_Server</title>
+    <style>
+        :root {
+            --primary: #4F46E5;
+            --bg: #0f172a;
+            --text: #f8fafc;
+            --card-bg: #1e293b;
+        }
+        body {
+            font-family: 'Inter', system-ui, sans-serif;
+            background-color: var(--bg);
+            color: var(--text);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+        }
+        .container {
+            background-color: var(--card-bg);
+            padding: 2rem;
+            border-radius: 1rem;
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);
+            max-width: 500px;
+            width: 90%;
+            text-align: center;
+        }
+        h1 { margin-top: 0; font-size: 1.5rem; color: #38bdf8; }
+        button {
+            background-color: var(--primary);
+            color: white;
+            border: none;
+            padding: 0.75rem 1.5rem;
+            border-radius: 0.5rem;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: transform 0.2s, background-color 0.2s;
+            margin-top: 1rem;
+        }
+        button:hover {
+            background-color: #4338ca;
+            transform: scale(1.05);
+        }
+        #result {
+            margin-top: 1.5rem;
+            padding: 1rem;
+            background-color: rgba(0,0,0,0.2);
+            border-radius: 0.5rem;
+            font-family: monospace;
+            white-space: pre-wrap;
+            text-align: left;
+            word-wrap: break-word;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚀 HTTP_Server Test App</h1>
+        <p>This is a static frontend. Click the button below to test the routing to the Node.js backend and the database connection.</p>
+        <button id="fetchBtn">Ping Backend / Database</button>
+        <div id="result">Waiting for action...</div>
+    </div>
+
+    <script>
+        document.getElementById('fetchBtn').addEventListener('click', async () => {
+            const resultDiv = document.getElementById('result');
+            resultDiv.innerText = 'Loading...';
+            try {
+                // The HTTP_Server handles reverse proxying /api/ to the backend container automatically!
+                const response = await fetch('/api/status');
+                const data = await response.json();
+                resultDiv.innerText = JSON.stringify(data, null, 2);
+                if (response.ok) {
+                    resultDiv.style.color = '#4ade80'; // green
+                } else {
+                    resultDiv.style.color = '#f87171'; // red
+                }
+            } catch (err) {
+                resultDiv.innerText = 'Network Error: ' + err.message;
+                resultDiv.style.color = '#f87171';
+            }
+        });
+    </script>
+</body>
+</html>

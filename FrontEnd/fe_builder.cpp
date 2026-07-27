@@ -15,8 +15,14 @@ bool FrontendBuilder::runCommand(const std::string& cmd,
                                  const std::string& cwd,
                                  std::string& output)
 {
-    // Build shell command: cd <cwd> && <cmd> 2>&1
-    std::string full = "cd " + cwd + " && " + cmd + " 2>&1";
+    // Escape single quotes in cwd for shell safety
+    std::string safe_cwd = cwd;
+    size_t pos = 0;
+    while ((pos = safe_cwd.find("'", pos)) != std::string::npos) {
+        safe_cwd.replace(pos, 1, "'\\''");
+        pos += 4;
+    }
+    std::string full = "cd '" + safe_cwd + "' && " + cmd + " 2>&1";
 
     FILE* pipe = popen(full.c_str(), "r");
     if (!pipe)
@@ -83,6 +89,11 @@ bool FrontendBuilder::build(const std::string& domain,
         return false;
     }
 
+    if (fe_build != "none" && !fe_build.empty())
+    {
+        std::error_code ec;
+        fs::remove_all(public_dir, ec);
+    }
     fs::create_directories(public_dir);
 
     bool ok = false;

@@ -56,18 +56,20 @@ void K8sController::parseKubeconfig()
             token_ = trim(t.substr(6));
         else if (t.rfind("certificate-authority:", 0) == 0)
             ca_cert_path_ = trim(t.substr(22));
+        else if (t.rfind("certificate-authority-data:", 0) == 0)
+            ca_cert_path_ = ""; // Fallback to insecure for inline certs
     }
 }
 
 // ─────────────────────────────────────────────────────────────
 //  libcurl helper — GET
 // ─────────────────────────────────────────────────────────────
-std::string K8sController::curlGet(const std::string& url)
+K8sController::HttpResponse K8sController::curlGet(const std::string& url)
 {
+    HttpResponse res;
     CURL* curl = curl_easy_init();
-    if (!curl) return "";
+    if (!curl) return res;
 
-    std::string response;
     std::string auth = "Authorization: Bearer " + token_;
 
     struct curl_slist* headers = nullptr;
@@ -77,28 +79,29 @@ std::string K8sController::curlGet(const std::string& url)
     curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curlWriteCb);
-    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &res.body);
     if (!ca_cert_path_.empty())
         curl_easy_setopt(curl, CURLOPT_CAINFO, ca_cert_path_.c_str());
     else
         curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
 
     curl_easy_perform(curl);
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &res.code);
     curl_slist_free_all(headers);
     curl_easy_cleanup(curl);
-    return response;
+    return res;
 }
 
 // ─────────────────────────────────────────────────────────────
 //  libcurl helper — POST (application/json)
 // ─────────────────────────────────────────────────────────────
-std::string K8sController::curlPost(const std::string& url,
+K8sController::HttpResponse K8sController::curlPost(const std::string& url,
                                      const std::string& body)
 {
+    HttpResponse res;
     CURL* curl = curl_easy_init();
-    if (!curl) return "";
+    if (!curl) return res;
 
-    std::string response;
     std::string auth = "Authorization: Bearer " + token_;
 
     struct curl_slist* headers = nullptr;
@@ -110,27 +113,28 @@ std::string K8sController::curlPost(const std::string& url,
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
     curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body.c_str());
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curlWriteCb);
-    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &res.body);
     if (!ca_cert_path_.empty())
         curl_easy_setopt(curl, CURLOPT_CAINFO, ca_cert_path_.c_str());
     else
         curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
 
     curl_easy_perform(curl);
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &res.code);
     curl_slist_free_all(headers);
     curl_easy_cleanup(curl);
-    return response;
+    return res;
 }
 
 // ─────────────────────────────────────────────────────────────
 //  libcurl helper — DELETE
 // ─────────────────────────────────────────────────────────────
-std::string K8sController::curlDelete(const std::string& url)
+K8sController::HttpResponse K8sController::curlDelete(const std::string& url)
 {
+    HttpResponse res;
     CURL* curl = curl_easy_init();
-    if (!curl) return "";
+    if (!curl) return res;
 
-    std::string response;
     std::string auth = "Authorization: Bearer " + token_;
 
     struct curl_slist* headers = nullptr;
@@ -140,16 +144,17 @@ std::string K8sController::curlDelete(const std::string& url)
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
     curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "DELETE");
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curlWriteCb);
-    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &res.body);
     if (!ca_cert_path_.empty())
         curl_easy_setopt(curl, CURLOPT_CAINFO, ca_cert_path_.c_str());
     else
         curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 0L);
 
     curl_easy_perform(curl);
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &res.code);
     curl_slist_free_all(headers);
     curl_easy_cleanup(curl);
-    return response;
+    return res;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -157,61 +162,24 @@ std::string K8sController::curlDelete(const std::string& url)
 //  Returns true if the response indicates success; logs
 //  detailed error messages with context on failure.
 // ─────────────────────────────────────────────────────────────
-bool K8sController::checkApiResponse(const std::string& response,
+bool K8sController::checkApiResponse(const K8sController::HttpResponse& response,
                                       const std::string& context)
 {
-    if (response.empty())
-    {
-        std::cerr << "[K8sController] " << context
-                  << ": empty response (network error or timeout)\n";
-        return false;
-    }
-
-    // Parse the response to check for K8s API error indicators
-    Json::Value root;
-    Json::CharReaderBuilder builder;
-    std::string errs;
-    std::istringstream stream(response);
-
-    if (!Json::parseFromStream(builder, stream, &root, &errs))
-    {
-        // If we can't parse JSON, check for raw error indicators
-        if (response.find("\"status\":\"Failure\"") != std::string::npos ||
-            response.find("\"kind\":\"Status\"") != std::string::npos)
-        {
-            std::cerr << "[K8sController] " << context
-                      << ": API error (unparseable): " << response.substr(0, 300) << "\n";
-            return false;
-        }
-        // Some responses (e.g., logs) are not JSON — treat as success
+    if (response.code >= 200 && response.code < 300) {
         return true;
     }
-
-    // Check for K8s Status object indicating failure
-    if (root.isMember("kind") && root["kind"].asString() == "Status")
-    {
-        std::string status = root.isMember("status") ? root["status"].asString() : "";
-        if (status == "Failure")
-        {
-            int code = root.isMember("code") ? root["code"].asInt() : 0;
-            std::string message = root.isMember("message") ? root["message"].asString() : "unknown";
-            std::string reason  = root.isMember("reason")  ? root["reason"].asString()  : "unknown";
-
-            // 409 Conflict (AlreadyExists) is not a fatal error for idempotent creates
-            if (code == 409 && reason == "AlreadyExists")
-            {
-                std::cout << "[K8sController] " << context
-                          << ": resource already exists (idempotent OK)\n";
-                return true;
-            }
-
-            std::cerr << "[K8sController] " << context
-                      << ": API error " << code << " (" << reason << "): " << message << "\n";
-            return false;
-        }
+    
+    // 409 Conflict (AlreadyExists) is not a fatal error for idempotent creates
+    if (response.code == 409) {
+        std::cout << "[K8sController] " << context
+                  << ": resource already exists (idempotent OK)\n";
+        return true;
     }
-
-    return true;
+    
+    std::cerr << "[K8sController] " << context
+              << ": API error " << response.code << " - " 
+              << response.body.substr(0, std::min<size_t>(response.body.size(), 300)) << "\n";
+    return false;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -266,12 +234,12 @@ ResourceTier K8sController::lookupResourceTier(const std::string& domain)
 bool K8sController::ensureNamespace(const std::string& ns)
 {
     // Check if already exists
-    std::string check = curlGet(api_server_ + "/api/v1/namespaces/" + ns);
-    if (check.find("\"name\":\"" + ns + "\"") != std::string::npos)
+    HttpResponse check = curlGet(api_server_ + "/api/v1/namespaces/" + ns);
+    if (check.code == 200 && check.body.find("\"name\":\"" + ns + "\"") != std::string::npos)
         return true;
 
     std::string body = R"({"apiVersion":"v1","kind":"Namespace","metadata":{"name":")" + ns + R"("}})";
-    std::string resp = curlPost(api_server_ + "/api/v1/namespaces", body);
+    HttpResponse resp = curlPost(api_server_ + "/api/v1/namespaces", body);
     bool ok = checkApiResponse(resp, "ensureNamespace(" + ns + ")");
     std::cout << "[K8sController] Namespace " << ns << (ok ? " created" : " failed") << "\n";
     return ok;
@@ -322,20 +290,43 @@ std::string K8sController::buildPersistentVolumeClaimJson(const std::string& ns,
                                                            const std::string& name,
                                                            int size_gb)
 {
-    return R"({
-    "apiVersion": "v1",
-    "kind": "PersistentVolumeClaim",
-    "metadata": {"name": ")" + name + R"(", "namespace": ")" + ns + R"("},
-    "spec": {
-        "accessModes": ["ReadWriteOnce"],
-        "storageClassName": "local-path",
-        "resources": {
-            "requests": {
-                "storage": ")" + std::to_string(size_gb) + R"(Gi"
-            }
-        }
-    }
-})";
+    Json::Value root;
+    root["apiVersion"] = "v1";
+    root["kind"] = "PersistentVolumeClaim";
+    root["metadata"]["name"] = name;
+    root["metadata"]["namespace"] = ns;
+    root["spec"]["accessModes"].append("ReadWriteOnce");
+    root["spec"]["storageClassName"] = "local-path";
+    root["spec"]["resources"]["requests"]["storage"] = std::to_string(size_gb) + "Gi";
+    
+    Json::FastWriter writer;
+    std::string out = writer.write(root);
+    out.erase(std::remove(out.begin(), out.end(), '\n'), out.end());
+    return out;
+}
+
+// ─────────────────────────────────────────────────────────────
+//  buildCertificateJson — cert-manager.io TLS Certificate
+// ─────────────────────────────────────────────────────────────
+std::string K8sController::buildCertificateJson(const std::string& ns,
+                                                 const std::string& name,
+                                                 const std::string& domain,
+                                                 const std::string& secret_name)
+{
+    Json::Value root;
+    root["apiVersion"] = "cert-manager.io/v1";
+    root["kind"] = "Certificate";
+    root["metadata"]["name"] = name;
+    root["metadata"]["namespace"] = ns;
+    root["spec"]["secretName"] = secret_name;
+    root["spec"]["dnsNames"].append(domain);
+    root["spec"]["issuerRef"]["name"] = "letsencrypt-prod";
+    root["spec"]["issuerRef"]["kind"] = "ClusterIssuer";
+
+    Json::FastWriter writer;
+    std::string out = writer.write(root);
+    out.erase(std::remove(out.begin(), out.end(), '\n'), out.end());
+    return out;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -347,38 +338,44 @@ std::string K8sController::buildIngressJson(const std::string& ns,
                                              const std::string& name,
                                              const std::string& domain,
                                              const std::string& backend_service_name,
-                                             int backend_port)
+                                             int backend_port,
+                                             const std::string& tls_secret_name)
 {
-    return R"({
-    "apiVersion": "networking.k8s.io/v1",
-    "kind": "Ingress",
-    "metadata": {
-        "name": ")" + name + R"(",
-        "namespace": ")" + ns + R"(",
-        "annotations": {
-            "kubernetes.io/ingress.class": "traefik"
-        }
-    },
-    "spec": {
-        "rules": [{
-            "host": ")" + domain + R"(",
-            "http": {
-                "paths": [{
-                    "path": "/",
-                    "pathType": "Prefix",
-                    "backend": {
-                        "service": {
-                            "name": ")" + backend_service_name + R"(",
-                            "port": {
-                                "number": )" + std::to_string(backend_port) + R"(
-                            }
-                        }
-                    }
-                }]
-            }
-        }]
+    Json::Value root;
+    root["apiVersion"] = "networking.k8s.io/v1";
+    root["kind"] = "Ingress";
+    root["metadata"]["name"] = name;
+    root["metadata"]["namespace"] = ns;
+    root["metadata"]["annotations"]["kubernetes.io/ingress.class"] = "traefik";
+
+    if (!tls_secret_name.empty())
+    {
+        root["metadata"]["annotations"]["cert-manager.io/cluster-issuer"] = "letsencrypt-prod";
+        Json::Value tlsItem;
+        tlsItem["hosts"].append(domain);
+        tlsItem["secretName"] = tls_secret_name;
+        root["spec"]["tls"].append(tlsItem);
     }
-})";
+    
+    Json::Value path;
+    path["path"] = "/";
+    path["pathType"] = "Prefix";
+    path["backend"]["service"]["name"] = backend_service_name;
+    path["backend"]["service"]["port"]["number"] = backend_port;
+    
+    Json::Value http;
+    http["paths"].append(path);
+    
+    Json::Value rule;
+    rule["host"] = domain;
+    rule["http"] = http;
+    
+    root["spec"]["rules"].append(rule);
+    
+    Json::FastWriter writer;
+    std::string out = writer.write(root);
+    out.erase(std::remove(out.begin(), out.end(), '\n'), out.end());
+    return out;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -397,79 +394,76 @@ std::string K8sController::buildDbDeploymentJson(const std::string& ns,
     std::string image = dbImage(db.type);
     std::string mount_path = dbMountPath(db.type);
 
-    // Build env vars depending on DB type
-    std::string env_json;
-    if (db.type == "postgres")
-    {
-        env_json = R"([
-            {"name":"POSTGRES_USER","value":")" + db_user + R"("},
-            {"name":"POSTGRES_PASSWORD","value":")" + db_password + R"("},
-            {"name":"POSTGRES_DB","value":")" + db.db_name + R"("}
-        ])";
+    Json::Value root;
+    root["apiVersion"] = "apps/v1";
+    root["kind"] = "Deployment";
+    root["metadata"]["name"] = name;
+    root["metadata"]["namespace"] = ns;
+    
+    Json::Value& spec = root["spec"];
+    spec["replicas"] = 1;
+    spec["strategy"]["type"] = "Recreate";
+    spec["selector"]["matchLabels"]["app"] = name;
+    
+    Json::Value& template_ = spec["template"];
+    template_["metadata"]["labels"]["app"] = name;
+    
+    Json::Value& pod_spec = template_["spec"];
+    
+    Json::Value container;
+    container["name"] = "db";
+    container["image"] = image;
+    
+    Json::Value p;
+    p["containerPort"] = port;
+    container["ports"].append(p);
+    
+    Json::Value env(Json::arrayValue);
+    if (db.type == "postgres") {
+        Json::Value e1, e2, e3;
+        e1["name"] = "POSTGRES_USER"; e1["value"] = db_user;
+        e2["name"] = "POSTGRES_PASSWORD"; e2["value"] = db_password;
+        e3["name"] = "POSTGRES_DB"; e3["value"] = db.db_name;
+        env.append(e1); env.append(e2); env.append(e3);
+    } else if (db.type == "mysql") {
+        Json::Value e1, e2, e3, e4;
+        e1["name"] = "MYSQL_ROOT_PASSWORD"; e1["value"] = db_password;
+        e2["name"] = "MYSQL_DATABASE"; e2["value"] = db.db_name;
+        e3["name"] = "MYSQL_USER"; e3["value"] = db_user;
+        e4["name"] = "MYSQL_PASSWORD"; e4["value"] = db_password;
+        env.append(e1); env.append(e2); env.append(e3); env.append(e4);
+    } else if (db.type == "mongo") {
+        Json::Value e1, e2, e3;
+        e1["name"] = "MONGO_INITDB_ROOT_USERNAME"; e1["value"] = db_user;
+        e2["name"] = "MONGO_INITDB_ROOT_PASSWORD"; e2["value"] = db_password;
+        e3["name"] = "MONGO_INITDB_DATABASE"; e3["value"] = db.db_name;
+        env.append(e1); env.append(e2); env.append(e3);
     }
-    else if (db.type == "mysql")
-    {
-        env_json = R"([
-            {"name":"MYSQL_ROOT_PASSWORD","value":")" + db_password + R"("},
-            {"name":"MYSQL_DATABASE","value":")" + db.db_name + R"("},
-            {"name":"MYSQL_USER","value":")" + db_user + R"("},
-            {"name":"MYSQL_PASSWORD","value":")" + db_password + R"("}
-        ])";
-    }
-    else if (db.type == "mongo")
-    {
-        env_json = R"([
-            {"name":"MONGO_INITDB_ROOT_USERNAME","value":")" + db_user + R"("},
-            {"name":"MONGO_INITDB_ROOT_PASSWORD","value":")" + db_password + R"("},
-            {"name":"MONGO_INITDB_DATABASE","value":")" + db.db_name + R"("}
-        ])";
-    }
-    else
-    {
-        env_json = "[]";
-    }
-
-    return R"({
-    "apiVersion": "apps/v1",
-    "kind": "Deployment",
-    "metadata": {"name": ")" + name + R"(", "namespace": ")" + ns + R"("},
-    "spec": {
-        "replicas": 1,
-        "strategy": {"type": "Recreate"},
-        "selector": {"matchLabels": {"app": ")" + name + R"("}},
-        "template": {
-            "metadata": {"labels": {"app": ")" + name + R"("}},
-            "spec": {
-                "containers": [{
-                    "name": "db",
-                    "image": ")" + image + R"(",
-                    "ports": [{"containerPort": )" + std::to_string(port) + R"(}],
-                    "env": )" + env_json + R"(,
-                    "resources": {
-                        "requests": {
-                            "cpu": ")" + max_cpu + R"(",
-                            "memory": ")" + max_memory + R"("
-                        },
-                        "limits": {
-                            "cpu": ")" + max_cpu + R"(",
-                            "memory": ")" + max_memory + R"("
-                        }
-                    },
-                    "volumeMounts": [{
-                        "name": "db-data",
-                        "mountPath": ")" + mount_path + R"("
-                    }]
-                }],
-                "volumes": [{
-                    "name": "db-data",
-                    "persistentVolumeClaim": {
-                        "claimName": ")" + pvc_name + R"("
-                    }
-                }]
-            }
-        }
-    }
-})";
+    container["env"] = env;
+    
+    Json::Value resources;
+    resources["limits"]["cpu"] = max_cpu;
+    resources["limits"]["memory"] = max_memory;
+    resources["requests"]["cpu"] = max_cpu;
+    resources["requests"]["memory"] = max_memory;
+    container["resources"] = resources;
+    
+    Json::Value volumeMount;
+    volumeMount["name"] = "db-data";
+    volumeMount["mountPath"] = mount_path;
+    container["volumeMounts"].append(volumeMount);
+    
+    pod_spec["containers"].append(container);
+    
+    Json::Value volume;
+    volume["name"] = "db-data";
+    volume["persistentVolumeClaim"]["claimName"] = pvc_name;
+    pod_spec["volumes"].append(volume);
+    
+    Json::FastWriter writer;
+    std::string out = writer.write(root);
+    out.erase(std::remove(out.begin(), out.end(), '\n'), out.end());
+    return out;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -480,17 +474,26 @@ std::string K8sController::buildServiceJson(const std::string& ns,
                                              int port,
                                              const std::string& selector_app)
 {
-    return R"({
-    "apiVersion": "v1",
-    "kind": "Service",
-    "metadata": {"name": ")" + name + R"(", "namespace": ")" + ns + R"("},
-    "spec": {
-        "selector": {"app": ")" + selector_app + R"("},
-        "ports": [{"protocol":"TCP","port":)" + std::to_string(port) +
-               R"(,"targetPort":)" + std::to_string(port) + R"(}],
-        "type": "ClusterIP"
-    }
-})";
+    Json::Value root;
+    root["apiVersion"] = "v1";
+    root["kind"] = "Service";
+    root["metadata"]["name"] = name;
+    root["metadata"]["namespace"] = ns;
+    
+    Json::Value& spec = root["spec"];
+    spec["selector"]["app"] = selector_app;
+    spec["type"] = "ClusterIP";
+    
+    Json::Value p;
+    p["protocol"] = "TCP";
+    p["port"] = port;
+    p["targetPort"] = port;
+    spec["ports"].append(p);
+    
+    Json::FastWriter writer;
+    std::string out = writer.write(root);
+    out.erase(std::remove(out.begin(), out.end(), '\n'), out.end());
+    return out;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -524,18 +527,18 @@ std::string K8sController::waitForPodRunning(const std::string& ns,
     {
         std::string url = api_server_ + "/api/v1/namespaces/" + ns +
                           "/pods?labelSelector=app%3D" + deployment_name;
-        std::string resp = curlGet(url);
+        HttpResponse resp = curlGet(url);
 
         // Look for "phase":"Running"
-        if (resp.find("\"phase\":\"Running\"") != std::string::npos)
+        if (resp.body.find("\"phase\":\"Running\"") != std::string::npos)
         {
             // Extract pod name
-            auto np = resp.find("\"name\":\"");
+            auto np = resp.body.find("\"name\":\"");
             if (np != std::string::npos)
             {
                 np += 8;
-                auto ne = resp.find("\"", np);
-                return resp.substr(np, ne - np);
+                auto ne = resp.body.find("\"", np);
+                return resp.body.substr(np, ne - np);
             }
         }
         std::this_thread::sleep_for(seconds(3));
@@ -584,7 +587,7 @@ std::string K8sController::spinUpDbContainer(const std::string& domain,
     // 3. Deploy PVC
     std::string pvc_json = buildPersistentVolumeClaimJson(ns, pvc_name, tier.db_storage_gb);
     std::string pvc_url  = api_server_ + "/api/v1/namespaces/" + ns + "/persistentvolumeclaims";
-    std::string pvc_resp = curlPost(pvc_url, pvc_json);
+    HttpResponse pvc_resp = curlPost(pvc_url, pvc_json);
     if (!checkApiResponse(pvc_resp, "PVC " + pvc_name))
     {
         record_out.status    = "error";
@@ -599,7 +602,7 @@ std::string K8sController::spinUpDbContainer(const std::string& domain,
     std::string dep_json = buildDbDeploymentJson(ns, name, db, db_user, db_password,
                                                   pvc_name, tier.db_max_cpu, tier.db_max_memory);
     std::string dep_url  = api_server_ + "/apis/apps/v1/namespaces/" + ns + "/deployments";
-    std::string dep_resp = curlPost(dep_url, dep_json);
+    HttpResponse dep_resp = curlPost(dep_url, dep_json);
     if (!checkApiResponse(dep_resp, "DB Deployment " + name))
     {
         record_out.status    = "error";
@@ -613,7 +616,7 @@ std::string K8sController::spinUpDbContainer(const std::string& domain,
     // 5. Create Service
     std::string svc_json = buildServiceJson(ns, name, port, name);
     std::string svc_url  = api_server_ + "/api/v1/namespaces/" + ns + "/services";
-    std::string svc_resp = curlPost(svc_url, svc_json);
+    HttpResponse svc_resp = curlPost(svc_url, svc_json);
     if (!checkApiResponse(svc_resp, "DB Service " + name))
     {
         record_out.status    = "error";
@@ -623,8 +626,8 @@ std::string K8sController::spinUpDbContainer(const std::string& domain,
     }
 
     // Get ClusterIP
-    std::string svc_get  = curlGet(api_server_ + "/api/v1/namespaces/" + ns + "/services/" + name);
-    std::string cluster_ip = parseClusterIp(svc_get);
+    HttpResponse svc_get  = curlGet(api_server_ + "/api/v1/namespaces/" + ns + "/services/" + name);
+    std::string cluster_ip = parseClusterIp(svc_get.body);
 
     // 6. Wait for pod Running
     std::string pod_name = waitForPodRunning(ns, name, timeout_secs);
@@ -670,11 +673,10 @@ std::string K8sController::spinUpDbContainer(const std::string& domain,
 std::string K8sController::buildBeDeploymentJson(const SiteEntry& site,
                                                   const std::string& ns,
                                                   const std::string& name,
-                                                  const std::map<std::string, std::string>& env,
+                                                  const std::map<std::string, std::string>& env_map,
                                                   const std::string& max_cpu,
                                                   const std::string& max_memory)
 {
-    // Choose base image based on be_type
     std::string image;
     if      (site.be_type == "node")   image = "node:20-alpine";
     else if (site.be_type == "python") image = "python:3.11-alpine";
@@ -683,64 +685,68 @@ std::string K8sController::buildBeDeploymentJson(const SiteEntry& site,
     else if (site.be_type == "php")    image = "php:8.2-cli-alpine";
     else                               image = "ubuntu:22.04";
 
-    // Build env array JSON
-    std::string env_arr = "[";
-    bool first = true;
-    for (const auto& [k, v] : env)
-    {
-        if (!first) env_arr += ",";
-        // Escape quotes in value
-        std::string escaped_v = v;
-        for (std::size_t i = 0; i < escaped_v.size(); ++i)
-            if (escaped_v[i] == '"') { escaped_v.insert(i, "\\"); ++i; }
-        env_arr += R"({"name":")" + k + R"(","value":")" + escaped_v + R"("})";
-        first = false;
-    }
-    env_arr += "]";
-
+    Json::Value root;
+    root["apiVersion"] = "apps/v1";
+    root["kind"] = "Deployment";
+    root["metadata"]["name"] = name;
+    root["metadata"]["namespace"] = ns;
+    
+    Json::Value& spec = root["spec"];
+    spec["replicas"] = 1;
+    spec["selector"]["matchLabels"]["app"] = name;
+    
+    Json::Value& template_ = spec["template"];
+    template_["metadata"]["labels"]["app"] = name;
+    
+    Json::Value& pod_spec = template_["spec"];
+    
+    Json::Value container;
+    container["name"] = "be";
+    container["image"] = image;
+    
     std::string shell_cmd = "cd /app && " + site.run_cmd;
-    std::string run_cmd_json = R"(["/bin/sh","-c",")" + shell_cmd + R"("])";
-
-    return R"({
-    "apiVersion": "apps/v1",
-    "kind": "Deployment",
-    "metadata": {"name": ")" + name + R"(", "namespace": ")" + ns + R"("},
-    "spec": {
-        "replicas": 1,
-        "selector": {"matchLabels": {"app": ")" + name + R"("}},
-        "template": {
-            "metadata": {"labels": {"app": ")" + name + R"("}},
-            "spec": {
-                "containers": [{
-                    "name": "be",
-                    "image": ")" + image + R"(",
-                    "command": )" + run_cmd_json + R"(,
-                    "workingDir": "/app",
-                    "ports": [{"containerPort": )" + std::to_string(site.be_port) + R"(}],
-                    "env": )" + env_arr + R"(,
-                    "resources": {
-                        "requests": {
-                            "cpu": ")" + max_cpu + R"(",
-                            "memory": ")" + max_memory + R"("
-                        },
-                        "limits": {
-                            "cpu": ")" + max_cpu + R"(",
-                            "memory": ")" + max_memory + R"("
-                        }
-                    },
-                    "volumeMounts": [{
-                        "name": "be-src",
-                        "mountPath": "/app"
-                    }]
-                }],
-                "volumes": [{
-                    "name": "be-src",
-                    "hostPath": {"path": ")" + site.be_folder + R"(", "type": "Directory"}
-                }]
-            }
-        }
+    container["command"].append("/bin/sh");
+    container["command"].append("-c");
+    container["command"].append(shell_cmd);
+    container["workingDir"] = "/app";
+    
+    Json::Value p;
+    p["containerPort"] = site.be_port;
+    container["ports"].append(p);
+    
+    Json::Value env(Json::arrayValue);
+    for (const auto& [k, v] : env_map) {
+        Json::Value e;
+        e["name"] = k;
+        e["value"] = v;
+        env.append(e);
     }
-})";
+    container["env"] = env;
+    
+    Json::Value resources;
+    resources["limits"]["cpu"] = max_cpu;
+    resources["limits"]["memory"] = max_memory;
+    resources["requests"]["cpu"] = max_cpu;
+    resources["requests"]["memory"] = max_memory;
+    container["resources"] = resources;
+    
+    Json::Value volumeMount;
+    volumeMount["name"] = "be-src";
+    volumeMount["mountPath"] = "/app";
+    container["volumeMounts"].append(volumeMount);
+    
+    pod_spec["containers"].append(container);
+    
+    Json::Value volume;
+    volume["name"] = "be-src";
+    volume["hostPath"]["path"] = site.be_folder;
+    volume["hostPath"]["type"] = "Directory";
+    pod_spec["volumes"].append(volume);
+    
+    Json::FastWriter writer;
+    std::string out = writer.write(root);
+    out.erase(std::remove(out.begin(), out.end(), '\n'), out.end());
+    return out;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -782,7 +788,7 @@ std::string K8sController::spinUpBeContainer(const SiteEntry& site,
     std::string dep_json = buildBeDeploymentJson(site, ns, name, env,
                                                   tier.be_max_cpu, tier.be_max_memory);
     std::string dep_url  = api_server_ + "/apis/apps/v1/namespaces/" + ns + "/deployments";
-    std::string dep_resp = curlPost(dep_url, dep_json);
+    HttpResponse dep_resp = curlPost(dep_url, dep_json);
     if (!checkApiResponse(dep_resp, "BE Deployment " + name))
     {
         record_out.status    = "error";
@@ -796,7 +802,7 @@ std::string K8sController::spinUpBeContainer(const SiteEntry& site,
     // 4. Create Service
     std::string svc_json = buildServiceJson(ns, name, site.be_port, name);
     std::string svc_url  = api_server_ + "/api/v1/namespaces/" + ns + "/services";
-    std::string svc_resp = curlPost(svc_url, svc_json);
+    HttpResponse svc_resp = curlPost(svc_url, svc_json);
     if (!checkApiResponse(svc_resp, "BE Service " + name))
     {
         record_out.status    = "error";
@@ -806,15 +812,15 @@ std::string K8sController::spinUpBeContainer(const SiteEntry& site,
     }
 
     // Get ClusterIP
-    std::string svc_get    = curlGet(api_server_ + "/api/v1/namespaces/" + ns + "/services/" + name);
-    std::string cluster_ip = parseClusterIp(svc_get);
+    HttpResponse svc_get    = curlGet(api_server_ + "/api/v1/namespaces/" + ns + "/services/" + name);
+    std::string cluster_ip = parseClusterIp(svc_get.body);
 
     // 5. Create Ingress for public gateway
     std::string ingress_name = "ingress-" + safe_domain;
     std::string ing_json = buildIngressJson(ns, ingress_name, site.domain, name,
                                              static_cast<int>(site.be_port));
     std::string ing_url  = api_server_ + "/apis/networking.k8s.io/v1/namespaces/" + ns + "/ingresses";
-    std::string ing_resp = curlPost(ing_url, ing_json);
+    HttpResponse ing_resp = curlPost(ing_url, ing_json);
     if (!checkApiResponse(ing_resp, "Ingress " + ingress_name))
     {
         // Ingress failure is non-fatal — the service still works within the cluster
@@ -856,9 +862,8 @@ std::string K8sController::spinUpBeContainer(const SiteEntry& site,
 // ─────────────────────────────────────────────────────────────
 bool K8sController::deleteNamespace(const std::string& ns)
 {
-    std::string resp = curlDelete(api_server_ + "/api/v1/namespaces/" + ns);
-    bool ok = (resp.find("\"status\":\"Terminating\"") != std::string::npos ||
-               resp.find("\"name\":\"" + ns + "\"") != std::string::npos);
+    HttpResponse resp = curlDelete(api_server_ + "/api/v1/namespaces/" + ns);
+    bool ok = (resp.code >= 200 && resp.code < 300);
     std::cout << "[K8sController] Delete namespace " << ns << (ok ? " OK" : " FAIL") << "\n";
     return ok;
 }
@@ -871,18 +876,71 @@ std::string K8sController::getPodLogs(const std::string& ns,
                                        int tail_lines)
 {
     // Find pod name first
-    std::string pods_resp = curlGet(
+    HttpResponse pods_resp = curlGet(
         api_server_ + "/api/v1/namespaces/" + ns +
         "/pods?labelSelector=app%3D" + deployment_name);
 
-    auto np = pods_resp.find("\"name\":\"");
+    auto np = pods_resp.body.find("\"name\":\"");
     if (np == std::string::npos) return "No pod found";
     np += 8;
-    auto ne = pods_resp.find("\"", np);
-    std::string pod_name = pods_resp.substr(np, ne - np);
+    auto ne = pods_resp.body.find("\"", np);
+    std::string pod_name = pods_resp.body.substr(np, ne - np);
 
     std::string url = api_server_ + "/api/v1/namespaces/" + ns +
                       "/pods/" + pod_name + "/log?tailLines=" +
                       std::to_string(tail_lines);
-    return curlGet(url);
+    return curlGet(url).body;
+}
+
+// ─────────────────────────────────────────────────────────────
+//  runKanikoBuildJob
+// ─────────────────────────────────────────────────────────────
+bool K8sController::runKanikoBuildJob(const std::string& ns,
+                                      const std::string& name,
+                                      const std::string& git_url,
+                                      const std::string& destination_image,
+                                      int timeout_secs)
+{
+    ensureNamespace(ns);
+
+    Json::Value job(Json::objectValue);
+    job["apiVersion"] = "batch/v1";
+    job["kind"] = "Job";
+
+    Json::Value metadata(Json::objectValue);
+    metadata["name"] = name;
+    metadata["namespace"] = ns;
+    job["metadata"] = metadata;
+
+    Json::Value spec(Json::objectValue);
+    spec["backoffLimit"] = 1;
+
+    Json::Value templateObj(Json::objectValue);
+    Json::Value podSpec(Json::objectValue);
+    podSpec["restartPolicy"] = "Never";
+
+    Json::Value container(Json::objectValue);
+    container["name"] = "kaniko-builder";
+    container["image"] = "gcr.io/kaniko-project/executor:latest";
+
+    Json::Value args(Json::arrayValue);
+    args.append("--context=" + git_url);
+    args.append("--destination=" + destination_image);
+    args.append("--no-push");
+    container["args"] = args;
+
+    Json::Value containers(Json::arrayValue);
+    containers.append(container);
+    podSpec["containers"] = containers;
+
+    templateObj["spec"] = podSpec;
+    spec["template"] = templateObj;
+    job["spec"] = spec;
+
+    Json::FastWriter writer;
+    std::string job_json = writer.write(job);
+
+    std::string url = api_server_ + "/apis/batch/v1/namespaces/" + ns + "/jobs";
+    HttpResponse resp = curlPost(url, job_json);
+    return checkApiResponse(resp, "runKanikoBuildJob " + name);
 }

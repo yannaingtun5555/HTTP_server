@@ -53,6 +53,10 @@ private:
                  unsigned http_version, bool keep_alive);
 
     static http::response<http::string_body>
+    handleLogs(const std::string& domain,
+               unsigned http_version, bool keep_alive);
+
+    static http::response<http::string_body>
     handleReload(unsigned http_version, bool keep_alive);
 
     // Deploy sequence (runs synchronously in the calling thread

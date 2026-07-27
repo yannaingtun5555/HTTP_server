@@ -36,6 +36,18 @@ public:
         std::shared_ptr<Session> session,
         const BackendConfig& backend
     );
+
+    /**
+     * Perform a health check on a target backend (host:port).
+     * Returns true if the TCP connection succeeds and responds within timeout.
+     */
+    static bool checkBackendHealth(const std::string& host, unsigned port, int timeout_secs = 5);
+
+    /**
+     * Rate limiter (Token Bucket): check if client IP has exceeded request quota.
+     * Returns true if allowed, false if rate limited (429 Too Many Requests).
+     */
+    static bool allowClientRequest(const std::string& client_ip, int max_burst = 60, int fill_rate_per_sec = 10);
 };
 
 #endif // PROXY_HANDLER_HPP
